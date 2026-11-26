@@ -76,10 +76,10 @@ class TripleBarrierConfig(BaseModel):
 
     def new_instance_with_adjusted_volatility(self, volatility_factor: float) -> TripleBarrierConfig:
         new_trailing_stop = None
-        if self.config.triple_barrier_config.trailing_stop is not None:
+        if self.trailing_stop is not None:
             new_trailing_stop = TrailingStop(
-                activation_price=self.config.triple_barrier_config.trailing_stop.activation_price * Decimal(volatility_factor),
-                trailing_delta=self.config.triple_barrier_config.trailing_stop.trailing_delta * Decimal(volatility_factor)
+                activation_price=self.trailing_stop.activation_price * Decimal(volatility_factor),
+                trailing_delta=self.trailing_stop.trailing_delta * Decimal(volatility_factor)
             )
 
         return TripleBarrierConfig(
