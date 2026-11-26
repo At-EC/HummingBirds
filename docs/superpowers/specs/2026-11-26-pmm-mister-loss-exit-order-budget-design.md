@@ -58,7 +58,7 @@ Executor 创建 open order 前再次执行相同检查，避免 Controller 与 E
 
 PositionExecutor 在创建原始 TP 或亏损退出 TP 前：
 
-1. 若预算暂停有效，不下单，保留当前持仓与执行器状态。
+1. 原始 TP 在预算暂停有效时不下单；亏损退出 TP 不受预算暂停限制，确保撤单后可以重挂。
 2. 若名义金额低于阈值，不下单，记录跳过原因，并在后续 tick 重试。
 3. 原始 TP 未创建或等待重试时，不伪造成交，不提前终止 Executor。
 4. 亏损退出因最小金额无法下单时，不进入 POSITION_HOLD，不标记完成；保留串行锁，避免其他亏损退出订单同时创建。
@@ -79,7 +79,7 @@ PositionExecutor 在创建原始 TP 或亏损退出 TP 前：
 确认预算不足后：
 
 1. 记录 `paused_at`、`resume_at = paused_at + no_budget_retry_seconds` 和错误摘要。
-2. 暂停当前 Controller 的新开单、原始 TP、亏损退出 TP 和新的亏损退出激活。
+2. 暂停当前 Controller 的普通新开单和原始 TP；亏损退出激活与退出 TP 必须豁免，以便撤销原 TP 并重新挂单释放库存与预算。
 3. 已有订单及撤单、effectivization、全局风控流程继续运行。
 
 ## 恢复条件
@@ -122,7 +122,7 @@ Controller 或 Executor 的自定义状态中增加：
 
 - 明确预算错误触发同一 Controller 的共享暂停。
 - 非预算错误和空错误消息不触发暂停。
-- 新开单、TP 与亏损退出激活在暂停期间被阻止。
+- 普通新开单和原始 TP 在暂停期间被阻止，亏损退出激活与退出 TP 仍可执行。
 - 任意订单成交后立即恢复。
 - 无成交时到期自动恢复。
 - 不同 `controller_id` 互不影响。

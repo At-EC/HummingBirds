@@ -31,6 +31,7 @@ docker run -d --name "$CONTAINER" \
 BACKUP_ROOT="$BACKUP_ROOT" ./install_loss_exit.sh --container "$CONTAINER" --yes
 BACKUP_ROOT="$BACKUP_ROOT" ./install_loss_exit.sh --container "$CONTAINER" --yes
 docker exec "$CONTAINER" test -f /home/hummingbot/hummingbot/data_feed/market_data_provider.py
+docker exec "$CONTAINER" test -f /home/hummingbot/hummingbot/strategy_v2/controllers/order_budget.py
 
 cp "$SOURCE_FILE" "$ORIGINAL"
 printf 'def invalid_python(:\n' > "$SOURCE_FILE"
