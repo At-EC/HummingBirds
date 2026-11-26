@@ -1,7 +1,9 @@
-ARG HB_VERSION=version-2.17.0
-FROM hummingbot/hummingbot:${HB_VERSION}
+# Docker Hub's version-2.17.0 tag currently contains dev-2.18.0.
+# Pin the verified Hummingbot 2.17.0 image instead of a mutable tag.
+ARG HB_IMAGE=hummingbot/hummingbot@sha256:b676cb7279ca147b76a510777abf515a0d2f1b17e45a70da4831bb03a587c8e1
+FROM ${HB_IMAGE}
 
-ARG HB_VERSION
+ARG HB_VERSION=2.17.0
 ARG COMMIT=latest
 LABEL branch=${HB_VERSION} commit=${COMMIT}
 
