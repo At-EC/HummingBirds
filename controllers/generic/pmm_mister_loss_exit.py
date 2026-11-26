@@ -7,6 +7,7 @@ from pydantic import Field, field_validator, model_validator
 from controllers.generic import pmm_mister as _pmm_mister
 from hummingbot.core.data_type.common import TradeType
 from hummingbot.strategy_v2.controllers.loss_exit_recovery import LossExitRecoveryStore
+from hummingbot.strategy_v2.controllers.order_budget import OrderBudgetGuard
 from hummingbot.strategy_v2.executors.data_types import PositionSummary
 from hummingbot.strategy_v2.executors.position_executor.data_types import LossExitConfig
 from hummingbot.strategy_v2.executors.position_executor.loss_exit import LossExitState
@@ -34,6 +35,12 @@ class PMMisterLossExitConfig(_pmm_mister.PMMisterConfig):
     tp_order_distance_tolerance_pct: Decimal = Field(
         default=Decimal("0"), ge=0, lt=1,
         json_schema_extra={"is_updatable": True},
+    )
+    min_order_amount_quote: Decimal = Field(
+        default=Decimal("0"), ge=0, json_schema_extra={"is_updatable": True}
+    )
+    no_budget_retry_seconds: int = Field(
+        default=300, ge=1, json_schema_extra={"is_updatable": True}
     )
 
     @field_validator("loss_exit_trigger_pct", mode="before")
@@ -93,9 +100,22 @@ class PMMisterLossExit(_pmm_mister.PMMister):
         )
 
     def get_executor_config(self, level_id: str, price: Decimal, amount: Decimal):
+        now = self.market_data_provider.time()
+        if OrderBudgetGuard.is_paused(self.config.id, now):
+            return None
+        allowed, reason = OrderBudgetGuard.check_minimum(
+            self.config.id, amount, price, self.config.min_order_amount_quote
+        )
+        if not allowed:
+            if OrderBudgetGuard.should_log(self.config.id, reason, now):
+                self.logger().warning(reason)
+            return None
         if self._is_tp_distance_conflict(price):
             return None
         executor_config = super().get_executor_config(level_id, price, amount)
+        executor_config.controller_id = self.config.id
+        executor_config.min_order_amount_quote = self.config.min_order_amount_quote
+        executor_config.no_budget_retry_seconds = self.config.no_budget_retry_seconds
         if self.config.loss_exit_trigger_pct is not None:
             barriers = executor_config.triple_barrier_config.model_copy(deep=True)
             barriers.loss_exit = LossExitConfig(
@@ -137,6 +157,8 @@ class PMMisterLossExit(_pmm_mister.PMMister):
         return candidates
 
     def get_loss_exit_activation_action(self) -> Optional[ActivateLossExitAction]:
+        # Loss exit must remain available during a budget pause: it cancels
+        # the original TP and replaces it to release inventory and budget.
         if self.config.manual_kill_switch or self._global_close_phase is not None:
             return None
         if self._loss_exit_runtime_owns_record:
@@ -366,7 +388,7 @@ class PMMisterLossExit(_pmm_mister.PMMister):
                 elif previous_signed * active_signed > 0:
                     total_weight = abs(previous_signed) + abs(active_signed)
                     breakeven_price = (
-                        abs(previous_signed) * previous.breakeven_price
+                        abs(previous_signed) * active_position.breakeven_price
                         + abs(active_signed) * active_position.breakeven_price
                     ) / total_weight
                 elif abs(previous_signed) > abs(active_signed):
@@ -413,4 +435,6 @@ class PMMisterLossExit(_pmm_mister.PMMister):
             "loss_exit_active_price": active.custom_info.get("active_exit_price") if active else None,
             "loss_exit_remaining_amount": active.custom_info.get("remaining_exit_amount") if active else None,
         })
+        info.update(OrderBudgetGuard.snapshot(self.config.id, self.market_data_provider.time()))
+        info["min_order_amount_quote"] = str(self.config.min_order_amount_quote)
         return info

@@ -3,7 +3,7 @@ from __future__ import annotations
 from decimal import Decimal
 from typing import List, Literal, Optional
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from hummingbot.core.data_type.common import OrderType, TradeType
 from hummingbot.strategy_v2.executors.data_types import ExecutorConfigBase
@@ -76,10 +76,10 @@ class TripleBarrierConfig(BaseModel):
 
     def new_instance_with_adjusted_volatility(self, volatility_factor: float) -> TripleBarrierConfig:
         new_trailing_stop = None
-        if self.trailing_stop is not None:
+        if self.config.triple_barrier_config.trailing_stop is not None:
             new_trailing_stop = TrailingStop(
-                activation_price=self.trailing_stop.activation_price * Decimal(volatility_factor),
-                trailing_delta=self.trailing_stop.trailing_delta * Decimal(volatility_factor)
+                activation_price=self.config.triple_barrier_config.trailing_stop.activation_price * Decimal(volatility_factor),
+                trailing_delta=self.config.triple_barrier_config.trailing_stop.trailing_delta * Decimal(volatility_factor)
             )
 
         return TripleBarrierConfig(
@@ -106,6 +106,8 @@ class PositionExecutorConfig(ExecutorConfigBase):
     leverage: int = 1
     activation_bounds: Optional[List[Decimal]] = None
     level_id: Optional[str] = None
+    min_order_amount_quote: Decimal = Field(default=Decimal("0"), ge=0)
+    no_budget_retry_seconds: int = Field(default=300, ge=1)
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     @model_validator(mode="after")
@@ -118,4 +120,6 @@ class PositionExecutorConfig(ExecutorConfigBase):
         require_positive("entry_price", self.entry_price)
         require_at_least("leverage", self.leverage, 1)
         require_all_positive("activation_bounds", self.activation_bounds)
+        require_non_negative("min_order_amount_quote", self.min_order_amount_quote)
+        require_at_least("no_budget_retry_seconds", self.no_budget_retry_seconds, 1)
         return self
