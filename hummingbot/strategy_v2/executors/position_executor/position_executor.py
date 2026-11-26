@@ -19,6 +19,7 @@ from hummingbot.core.event.events import (
 )
 from hummingbot.logger import HummingbotLogger
 from hummingbot.strategy.strategy_v2_base import StrategyV2Base
+from hummingbot.strategy_v2.controllers.order_budget import OrderBudgetGuard
 from hummingbot.strategy_v2.executors.executor_base import ExecutorBase
 from hummingbot.strategy_v2.executors.position_executor.data_types import PositionExecutorConfig
 from hummingbot.strategy_v2.executors.position_executor.loss_exit import (
@@ -466,6 +467,8 @@ class PositionExecutor(ExecutorBase):
             )
             self.logger().error(self._loss_exit_last_error)
             return
+        if self._take_profit_limit_order is None:
+            return
         order_id = self._take_profit_limit_order.order_id
         self._loss_exit_orders[order_id] = self._take_profit_limit_order
         self._loss_exit_terminal_order_ids.discard(order_id)
@@ -664,12 +667,28 @@ class PositionExecutor(ExecutorBase):
         else:
             return True
 
+    def _order_creation_allowed(self, amount, price, allow_during_no_budget=False):
+        now = self._strategy.current_timestamp
+        if not allow_during_no_budget and OrderBudgetGuard.is_paused(self.config.controller_id, now):
+            return False
+        allowed, reason = OrderBudgetGuard.check_minimum(
+            self.config.controller_id, amount, price, self.config.min_order_amount_quote
+        )
+        if not allowed:
+            if self._loss_exit is not None:
+                self._loss_exit_last_error = reason
+            if OrderBudgetGuard.should_log(self.config.controller_id, reason, now):
+                self.logger().warning(reason)
+        return allowed
+
     def place_open_order(self):
         """
         This method is responsible for placing the open order.
 
         :return: None
         """
+        if not self._order_creation_allowed(self.config.amount, self.entry_price):
+            return
         order_id = self.place_order(
             connector_name=self.config.connector_name,
             trading_pair=self.config.trading_pair,
@@ -812,6 +831,11 @@ class PositionExecutor(ExecutorBase):
         """
         order_amount = self.amount_to_close if amount is None else amount
         order_price = self.take_profit_price if price is None else price
+        is_loss_exit_order = (self._loss_exit is not None
+                              and self._loss_exit.state in (LossExitState.ACTIVATING, LossExitState.ACTIVE)
+                              and self._loss_exit_activated)
+        if not self._order_creation_allowed(order_amount, order_price, allow_during_no_budget=is_loss_exit_order):
+            return
         order_id = self.place_order(
             connector_name=self.config.connector_name,
             trading_pair=self.config.trading_pair,
@@ -983,6 +1007,7 @@ class PositionExecutor(ExecutorBase):
         _total_executed_amount_backup, that can be used if the InFlightOrder
         is not available.
         """
+        OrderBudgetGuard.note_fill(self.config.controller_id)
         if self._is_paper_trade():
             order = self._paper_trade_orders.get(event.order_id)
             if order is not None:
@@ -1088,6 +1113,14 @@ class PositionExecutor(ExecutorBase):
                 and event.order_id in self._loss_exit_terminal_order_ids):
             self.logger().debug(f"Ignoring late failure for completed loss exit order {event.order_id}")
             return
+        message = event.error_message or ""
+        if OrderBudgetGuard.is_no_budget_error(message):
+            OrderBudgetGuard.note_no_budget(
+                self.config.controller_id,
+                self._strategy.current_timestamp,
+                self.config.no_budget_retry_seconds,
+                message,
+            )
         if self._is_paper_trade():
             self._update_paper_trade_order_state(event, OrderState.FAILED)
         if event.order_id in self._loss_exit_orders:
@@ -1153,6 +1186,8 @@ class PositionExecutor(ExecutorBase):
                 "loss_exit_snapshot_at": self._strategy.current_timestamp,
                 "last_error": self._loss_exit_last_error[:200] if self._loss_exit_last_error else None,
             })
+        info.update(OrderBudgetGuard.snapshot(self.config.controller_id, self._strategy.current_timestamp))
+        info["min_order_amount_quote"] = str(self.config.min_order_amount_quote)
         return info
 
     def to_format_status(self, scale=1.0):
