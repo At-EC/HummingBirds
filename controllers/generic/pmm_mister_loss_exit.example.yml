@@ -1,0 +1,42 @@
+id: pmm_mister_loss_exit_btc
+controller_name: pmm_mister_loss_exit
+controller_type: generic
+connector_name: binance_paper_trade
+trading_pair: BTC-USDT
+total_amount_quote: '1000'
+portfolio_allocation: '0.1'
+target_base_pct: '0.5'
+min_base_pct: '0.3'
+max_base_pct: '0.7'
+buy_spreads:
+- 0.0005
+sell_spreads:
+- 0.0005
+buy_amounts_pct:
+- '1'
+sell_amounts_pct:
+- '1'
+executor_refresh_time: 30
+buy_cooldown_time: 60
+sell_cooldown_time: 60
+buy_position_effectivization_time: 120
+sell_position_effectivization_time: 120
+price_distance_tolerance: '0.0005'
+refresh_tolerance: '0.0005'
+tolerance_scaling: '1.2'
+leverage: 1
+position_mode: ONEWAY
+position_side: BUY
+take_profit: '0.001'
+take_profit_order_type: LIMIT_MAKER
+open_order_type: LIMIT_MAKER
+max_active_executors_by_level: 4
+tick_mode: false
+position_profit_protection: false
+global_tp_enabled: false
+global_sl_enabled: false
+loss_exit_trigger_pct: '0.02'
+loss_exit_offset_pct: '0.001'
+loss_exit_cooldown_seconds: 60
+loss_exit_activation_delay_seconds: 300
+tp_order_distance_tolerance_pct: '0.001'
