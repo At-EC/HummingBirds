@@ -174,7 +174,7 @@ class PositionExecutor(ExecutorBase):
         """
         Get the filled amount of the open order in quote currency.
 
-        :return: The filled amount of the open order if it exists, otherwise 0.
+        :return: The filled amount of the open order in quote currency.
         """
         return self.open_filled_amount * self.entry_price
 
@@ -542,9 +542,9 @@ class PositionExecutor(ExecutorBase):
 
     def all_orders_completed(self):
         """
-        This method is responsible for checking if the open orders are completed. It checks if the open order is
-        completed, it stops the executor. If the close order is not placed, it places the close order. If the close order
-        is not filled, it waits for the close order to be filled and requests the order information to the connector.
+        This method is responsible for checking if the open orders are completed.
+
+        :return: True if the open orders are completed, False otherwise.
         """
         open_order_condition = not self._open_order or self._open_order.is_done
         take_profit_condition = not self._take_profit_limit_order or self._take_profit_limit_order.is_done
@@ -585,7 +585,7 @@ class PositionExecutor(ExecutorBase):
 
     async def control_close_order(self):
         """
-        This method is responsible for controlling the close order and canceling the open orders. If the close order is filled and the open orders are
+        This method is responsible for controlling the close order. If the close order is filled and the open orders are
         completed, it stops the executor. If the close order is not placed, it places the close order. If the close order
         is not filled, it waits for the close order to be filled and requests the order information to the connector.
         """
@@ -754,9 +754,7 @@ class PositionExecutor(ExecutorBase):
     def control_stop_loss(self):
         """
         This method is responsible for controlling the stop loss. If the net pnl percentage is less than the stop loss
-        percentage, it places the close order and cancels the open orders. If the stop loss order type is limit,
-        it places the stop loss limit order. If the amount of the stop loss order is different than the total amount
-        executed in the open order, it renews the stop loss order (can happen with partial fills).
+        percentage, it places the close order and cancels the open orders.
 
         :return: None
         """
@@ -1161,7 +1159,7 @@ class PositionExecutor(ExecutorBase):
                 if net_pnl_pct > self.config.triple_barrier_config.trailing_stop.activation_price:
                     self._trailing_stop_trigger_pct = net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta
             else:
-                if net_pnl_pct < self.config.triple_barrier_config.trailing_stop.trailing_delta:
+                if net_pnl_pct < self._trailing_stop_trigger_pct:
                     self.place_close_order_and_cancel_open_orders(close_type=CloseType.TRAILING_STOP)
                 if net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta > self._trailing_stop_trigger_pct:
                     self._trailing_stop_trigger_pct = net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta
