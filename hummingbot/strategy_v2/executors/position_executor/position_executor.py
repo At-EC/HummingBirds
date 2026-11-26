@@ -4,6 +4,7 @@ from decimal import Decimal
 from typing import Dict, List, Optional, Union
 
 from hummingbot.connector.connector_base import ConnectorBase
+from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.core.data_type.common import OrderType, PositionAction, PositionMode, PriceType, TradeType
 from hummingbot.core.data_type.order_candidate import OrderCandidate, PerpetualOrderCandidate
 from hummingbot.core.event.events import (
@@ -56,7 +57,14 @@ class PositionExecutor(ExecutorBase):
             config.entry_price = self.get_price(config.connector_name, config.trading_pair,
                                                 price_type=open_order_price_type)
         self.config: PositionExecutorConfig = config
-        self.trading_rules = self.get_trading_rules(self.config.connector_name, self.config.trading_pair)
+        try:
+            self.trading_rules = self.get_trading_rules(self.config.connector_name, self.config.trading_pair)
+        except AttributeError:
+            if not self.config.connector_name.endswith("_paper_trade"):
+                raise
+            # PaperTradeExchange does not expose exchange trading rules. Its
+            # own quantization still applies; use unconstrained minimums here.
+            self.trading_rules = TradingRule(self.config.trading_pair)
 
         # Order tracking
         self._open_order: Optional[TrackedOrder] = None
@@ -166,7 +174,7 @@ class PositionExecutor(ExecutorBase):
         """
         Get the filled amount of the open order in quote currency.
 
-        :return: The filled amount of the open order in quote currency.
+        :return: The filled amount of the open order if it exists, otherwise 0.
         """
         return self.open_filled_amount * self.entry_price
 
@@ -187,7 +195,7 @@ class PositionExecutor(ExecutorBase):
         """
         Get the filled amount of the close order in quote currency.
 
-        :return: The filled amount of the close order in quote currency.
+        :return: The filled amount of the close order if it exists, otherwise 0.
         """
         if self._loss_exit_activated:
             _, filled_quote = self._reconcile_loss_exit_fill_ledger()
@@ -198,6 +206,8 @@ class PositionExecutor(ExecutorBase):
     def filled_amount(self) -> Decimal:
         """
         Get the filled amount of the position.
+
+        :return: The filled amount of the position.
         """
         return self.open_filled_amount + self.close_filled_amount
 
@@ -205,6 +215,8 @@ class PositionExecutor(ExecutorBase):
     def filled_amount_quote(self) -> Decimal:
         """
         Get the filled amount of the position in quote currency.
+
+        :return: The filled amount of the position in quote currency.
         """
         return self.open_filled_amount_quote + self.close_filled_amount_quote if self.close_type != CloseType.POSITION_HOLD else Decimal("0")
 
@@ -317,7 +329,7 @@ class PositionExecutor(ExecutorBase):
 
     def get_net_pnl_quote(self) -> Decimal:
         """
-        Calculate the net pnl in quote asset
+        Calculate the net pnl in quote asset.
 
         :return: The net pnl in quote asset.
         """
@@ -325,7 +337,7 @@ class PositionExecutor(ExecutorBase):
 
     def get_cum_fees_quote(self) -> Decimal:
         """
-        Calculate the cumulative fees in quote asset
+        Calculate the cumulative fees in quote asset.
 
         :return: The cumulative fees in quote asset.
         """
@@ -343,7 +355,7 @@ class PositionExecutor(ExecutorBase):
 
     def get_net_pnl_pct(self) -> Decimal:
         """
-        Calculate the net pnl percentage
+        Calculate the net pnl percentage.
 
         :return: The net pnl percentage.
         """
@@ -530,9 +542,9 @@ class PositionExecutor(ExecutorBase):
 
     def all_orders_completed(self):
         """
-        This method is responsible for checking if the open orders are completed.
-
-        :return: True if the open orders are completed, False otherwise.
+        This method is responsible for checking if the open orders are completed. It checks if the open order is
+        completed, it stops the executor. If the close order is not placed, it places the close order. If the close order
+        is not filled, it waits for the close order to be filled and requests the order information to the connector.
         """
         open_order_condition = not self._open_order or self._open_order.is_done
         take_profit_condition = not self._take_profit_limit_order or self._take_profit_limit_order.is_done
@@ -573,7 +585,7 @@ class PositionExecutor(ExecutorBase):
 
     async def control_close_order(self):
         """
-        This method is responsible for controlling the close order. If the close order is filled and the open orders are
+        This method is responsible for controlling the close order and canceling the open orders. If the close order is filled and the open orders are
         completed, it stops the executor. If the close order is not placed, it places the close order. If the close order
         is not filled, it waits for the close order to be filled and requests the order information to the connector.
         """
@@ -742,7 +754,9 @@ class PositionExecutor(ExecutorBase):
     def control_stop_loss(self):
         """
         This method is responsible for controlling the stop loss. If the net pnl percentage is less than the stop loss
-        percentage, it places the close order and cancels the open orders.
+        percentage, it places the close order and cancels the open orders. If the stop loss order type is limit,
+        it places the stop loss limit order. If the amount of the stop loss order is different than the total amount
+        executed in the open order, it renews the stop loss order (can happen with partial fills).
 
         :return: None
         """
@@ -1147,7 +1161,7 @@ class PositionExecutor(ExecutorBase):
                 if net_pnl_pct > self.config.triple_barrier_config.trailing_stop.activation_price:
                     self._trailing_stop_trigger_pct = net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta
             else:
-                if net_pnl_pct < self._trailing_stop_trigger_pct:
+                if net_pnl_pct < self.config.triple_barrier_config.trailing_stop.trailing_delta:
                     self.place_close_order_and_cancel_open_orders(close_type=CloseType.TRAILING_STOP)
                 if net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta > self._trailing_stop_trigger_pct:
                     self._trailing_stop_trigger_pct = net_pnl_pct - self.config.triple_barrier_config.trailing_stop.trailing_delta
