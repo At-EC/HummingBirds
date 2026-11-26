@@ -13,6 +13,7 @@ paths=(
   controllers/generic/pmm_mister.py
   controllers/generic/pmm_mister_loss_exit.py
   controllers/generic/pmm_mister_loss_exit.example.yml
+  hummingbot/data_feed/market_data_provider.py
   hummingbot/strategy_v2/controllers/loss_exit_recovery.py
   hummingbot/strategy_v2/executors/executor_orchestrator.py
   hummingbot/strategy_v2/executors/position_executor/data_types.py
