@@ -28,8 +28,8 @@ leverage: 1
 position_mode: ONEWAY
 position_side: BUY
 take_profit: '0.001'
-take_profit_order_type: LIMIT_MAKER
-open_order_type: LIMIT_MAKER
+take_profit_order_type: LIMIT
+open_order_type: LIMIT
 max_active_executors_by_level: 4
 tick_mode: false
 position_profit_protection: false

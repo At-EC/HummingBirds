@@ -6,6 +6,7 @@ from typing import Dict, List, Optional, Union
 from hummingbot.connector.connector_base import ConnectorBase
 from hummingbot.connector.trading_rule import TradingRule
 from hummingbot.core.data_type.common import OrderType, PositionAction, PositionMode, PriceType, TradeType
+from hummingbot.core.data_type.in_flight_order import InFlightOrder, OrderState, OrderUpdate, TradeUpdate
 from hummingbot.core.data_type.order_candidate import OrderCandidate, PerpetualOrderCandidate
 from hummingbot.core.event.events import (
     BuyOrderCompletedEvent,
@@ -67,6 +68,7 @@ class PositionExecutor(ExecutorBase):
             self.trading_rules = TradingRule(self.config.trading_pair)
 
         # Order tracking
+        self._paper_trade_orders: Dict[str, InFlightOrder] = {}
         self._open_order: Optional[TrackedOrder] = None
         self._close_order: Optional[TrackedOrder] = None
         self._take_profit_limit_order: Optional[TrackedOrder] = None
@@ -920,6 +922,20 @@ class PositionExecutor(ExecutorBase):
             orders_by_id[synthetic_id] = held[-1]
         return held
 
+    def _is_paper_trade(self) -> bool:
+        return self.config.connector_name.endswith("_paper_trade")
+
+    def _update_paper_trade_order_state(self, event, new_state: OrderState):
+        order = self._paper_trade_orders.get(event.order_id)
+        if order is not None:
+            order.update_with_order_update(OrderUpdate(
+                trading_pair=order.trading_pair,
+                update_timestamp=event.timestamp,
+                new_state=new_state,
+                client_order_id=event.order_id,
+                exchange_order_id=getattr(event, "exchange_order_id", None) or order.exchange_order_id,
+            ))
+
     def update_tracked_orders_with_order_id(self, order_id: str):
         """
         This method is responsible for updating the tracked orders with the information from the InFlightOrder, using
@@ -928,7 +944,8 @@ class PositionExecutor(ExecutorBase):
         :param order_id: The order_id to be used as a reference.
         :return: None
         """
-        in_flight_order = self.get_in_flight_order(self.config.connector_name, order_id)
+        in_flight_order = (self._paper_trade_orders.get(order_id) if self._is_paper_trade()
+                           else self.get_in_flight_order(self.config.connector_name, order_id))
         if self._open_order and self._open_order.order_id == order_id:
             self._open_order.order = in_flight_order
         elif self._close_order and self._close_order.order_id == order_id:
@@ -943,6 +960,21 @@ class PositionExecutor(ExecutorBase):
         This method is responsible for processing the order created event. Here we will update the TrackedOrder with the
         order_id.
         """
+        if self._is_paper_trade() and event.order_id not in self._paper_trade_orders:
+            trade_type = TradeType.BUY if isinstance(event, BuyOrderCreatedEvent) else TradeType.SELL
+            self._paper_trade_orders[event.order_id] = InFlightOrder(
+                client_order_id=event.order_id,
+                trading_pair=event.trading_pair,
+                order_type=event.type,
+                trade_type=trade_type,
+                amount=event.amount,
+                creation_timestamp=event.creation_timestamp,
+                price=event.price,
+                exchange_order_id=event.exchange_order_id,
+                initial_state=OrderState.OPEN,
+                leverage=event.leverage or 1,
+                position=PositionAction(event.position or PositionAction.NIL.value),
+            )
         self.update_tracked_orders_with_order_id(event.order_id)
 
     def process_order_filled_event(self, _, market, event: OrderFilledEvent):
@@ -951,6 +983,21 @@ class PositionExecutor(ExecutorBase):
         _total_executed_amount_backup, that can be used if the InFlightOrder
         is not available.
         """
+        if self._is_paper_trade():
+            order = self._paper_trade_orders.get(event.order_id)
+            if order is not None:
+                fill_id = event.exchange_trade_id or f"{event.order_id}:{event.timestamp}:{event.amount}:{event.price}"
+                order.update_with_trade_update(TradeUpdate(
+                    trade_id=fill_id,
+                    client_order_id=event.order_id,
+                    exchange_order_id=event.exchange_order_id or event.order_id,
+                    trading_pair=event.trading_pair,
+                    fill_timestamp=event.timestamp,
+                    fill_price=event.price,
+                    fill_base_amount=event.amount,
+                    fill_quote_amount=event.amount * event.price,
+                    fee=event.trade_fee,
+                ))
         self.update_tracked_orders_with_order_id(event.order_id)
         is_exit_fill = event.order_id in self._loss_exit_orders
         is_risk_close_fill = (self._close_order is not None
@@ -978,6 +1025,8 @@ class PositionExecutor(ExecutorBase):
         if (self._loss_exit_activated and self._loss_exit.state == LossExitState.COMPLETED
                 and event.order_id in self._loss_exit_terminal_order_ids):
             return
+        if self._is_paper_trade():
+            self._update_paper_trade_order_state(event, OrderState.FILLED)
         self._total_executed_amount_backup += event.base_asset_amount
         self.update_tracked_orders_with_order_id(event.order_id)
 
@@ -1011,6 +1060,8 @@ class PositionExecutor(ExecutorBase):
                 and event.order_id in self._loss_exit_terminal_order_ids):
             self.logger().debug(f"Ignoring late cancellation for completed loss exit order {event.order_id}")
             return
+        if self._is_paper_trade():
+            self._update_paper_trade_order_state(event, OrderState.CANCELED)
         if event.order_id in self._loss_exit_orders:
             self._loss_exit_terminal_order_ids.add(event.order_id)
         if self._close_order and event.order_id == self._close_order.order_id:
@@ -1037,6 +1088,8 @@ class PositionExecutor(ExecutorBase):
                 and event.order_id in self._loss_exit_terminal_order_ids):
             self.logger().debug(f"Ignoring late failure for completed loss exit order {event.order_id}")
             return
+        if self._is_paper_trade():
+            self._update_paper_trade_order_state(event, OrderState.FAILED)
         if event.order_id in self._loss_exit_orders:
             self._loss_exit_terminal_order_ids.add(event.order_id)
         if self._open_order and event.order_id == self._open_order.order_id:
