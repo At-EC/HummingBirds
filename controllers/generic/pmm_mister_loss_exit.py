@@ -388,7 +388,7 @@ class PMMisterLossExit(_pmm_mister.PMMister):
                 elif previous_signed * active_signed > 0:
                     total_weight = abs(previous_signed) + abs(active_signed)
                     breakeven_price = (
-                        abs(previous_signed) * active_position.breakeven_price
+                        abs(previous_signed) * previous.breakeven_price
                         + abs(active_signed) * active_position.breakeven_price
                     ) / total_weight
                 elif abs(previous_signed) > abs(active_signed):
