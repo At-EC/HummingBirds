@@ -10,6 +10,7 @@ LABEL branch=${HB_VERSION} commit=${COMMIT}
 COPY controllers/generic/pmm_mister.py controllers/generic/pmm_mister.py
 COPY controllers/generic/pmm_mister_loss_exit.py controllers/generic/pmm_mister_loss_exit.py
 COPY controllers/generic/pmm_mister_loss_exit.example.yml controllers/generic/pmm_mister_loss_exit.example.yml
+COPY hummingbot/data_feed/market_data_provider.py hummingbot/data_feed/market_data_provider.py
 COPY hummingbot/strategy_v2/controllers/loss_exit_recovery.py hummingbot/strategy_v2/controllers/loss_exit_recovery.py
 COPY hummingbot/strategy_v2/executors/executor_orchestrator.py hummingbot/strategy_v2/executors/executor_orchestrator.py
 COPY hummingbot/strategy_v2/executors/position_executor/data_types.py hummingbot/strategy_v2/executors/position_executor/data_types.py
@@ -20,6 +21,7 @@ COPY hummingbot/strategy_v2/models/executor_actions.py hummingbot/strategy_v2/mo
 RUN /opt/conda/envs/hummingbot/bin/python -m py_compile \
     controllers/generic/pmm_mister.py \
     controllers/generic/pmm_mister_loss_exit.py \
+    hummingbot/data_feed/market_data_provider.py \
     hummingbot/strategy_v2/controllers/loss_exit_recovery.py \
     hummingbot/strategy_v2/executors/executor_orchestrator.py \
     hummingbot/strategy_v2/executors/position_executor/data_types.py \
