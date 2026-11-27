@@ -1145,6 +1145,14 @@ class PositionExecutor(ExecutorBase):
                 self._loss_exit_last_error = "Exit order failed; retry after cooldown"
                 self._loss_exit_cancel_requested = False
 
+    def snapshot_recovery_state(self) -> Dict:
+        from hummingbot.strategy_v2.executors.position_executor.recovery import ExecutorRuntimeRestorer
+        return ExecutorRuntimeRestorer.snapshot(self)
+
+    def restore_recovery_state(self, record: Dict, snapshots: Dict) -> None:
+        from hummingbot.strategy_v2.executors.position_executor.recovery import ExecutorRuntimeRestorer
+        ExecutorRuntimeRestorer.restore(self, record, snapshots)
+
     def get_custom_info(self) -> Dict:
         info = {
             "level_id": self.config.level_id,
