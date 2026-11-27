@@ -76,11 +76,19 @@ class PMMisterLossExit(_pmm_mister.PMMister):
         self._loss_exit_recovery_executor_id: Optional[str] = None
         self._loss_exit_recovery_logged = False
 
-    def _get_open_tp_prices(self) -> List[Decimal]:
+    def _get_open_tp_prices(self, side: Optional[TradeType] = None) -> List[Decimal]:
         prices = []
         for executor in self.executors_info:
             info = executor.custom_info
             if not info.get("take_profit_order_open", False):
+                continue
+            entry_side = getattr(getattr(executor, "config", None), "side", None)
+            tp_side = None
+            if entry_side == TradeType.BUY:
+                tp_side = TradeType.SELL
+            elif entry_side == TradeType.SELL:
+                tp_side = TradeType.BUY
+            if side is not None and tp_side != side:
                 continue
             try:
                 price = Decimal(str(info.get("take_profit_order_price")))
@@ -90,14 +98,28 @@ class PMMisterLossExit(_pmm_mister.PMMister):
                 prices.append(price)
         return prices
 
-    def _is_tp_distance_conflict(self, price: Decimal) -> bool:
+    def _is_tp_distance_conflict(self, price: Decimal, side: Optional[TradeType] = None) -> bool:
         tolerance = self.config.tp_order_distance_tolerance_pct
         if tolerance <= 0:
             return False
         return any(
             abs(price - tp_price) / tp_price < tolerance
-            for tp_price in self._get_open_tp_prices()
+            for tp_price in self._get_open_tp_prices(side)
         )
+
+    def _is_expected_tp_distance_conflict(self, level_id: str, price: Decimal) -> bool:
+        take_profit = self.config.take_profit
+        if not take_profit or not self.config.take_profit_order_type.is_limit_type():
+            return False
+        if level_id.startswith("buy"):
+            tp_side = TradeType.SELL
+            expected_tp_price = price * (1 + take_profit)
+        elif level_id.startswith("sell"):
+            tp_side = TradeType.BUY
+            expected_tp_price = price * (1 - take_profit)
+        else:
+            return False
+        return self._is_tp_distance_conflict(expected_tp_price, tp_side)
 
     def get_executor_config(self, level_id: str, price: Decimal, amount: Decimal):
         now = self.market_data_provider.time()
@@ -111,6 +133,8 @@ class PMMisterLossExit(_pmm_mister.PMMister):
                 self.logger().warning(reason)
             return None
         if self._is_tp_distance_conflict(price):
+            return None
+        if self._is_expected_tp_distance_conflict(level_id, price):
             return None
         executor_config = super().get_executor_config(level_id, price, amount)
         executor_config.controller_id = self.config.id
