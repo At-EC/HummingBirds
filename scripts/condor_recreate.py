@@ -37,10 +37,17 @@ def build_run_args(inspect, env_file, image):
 
 def is_live_deployment(inspect):
     for mount in inspect["Mounts"]:
-        if mount["Destination"].rstrip("/").endswith("/conf/controllers"):
-            for path in pathlib.Path(mount["Source"]).glob("*.yml"):
-                if "_paper_trade" in path.read_text(encoding="utf-8"):
-                    return False
+        destination = mount["Destination"].rstrip("/")
+        source = pathlib.Path(mount["Source"])
+        if destination.endswith("/conf/controllers"):
+            config_paths = list(source.glob("*.yml"))
+        elif "/conf/controllers/" in destination and destination.endswith(".yml"):
+            config_paths = [source]
+        else:
+            continue
+        for path in config_paths:
+            if "_paper_trade" in path.read_text(encoding="utf-8"):
+                return False
     return True
 
 

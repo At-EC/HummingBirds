@@ -134,3 +134,16 @@ def test_keep_open_orders_refuses_incompatible_original(monkeypatch):
         "--container", "demo", "--keep-open-orders", "--yes", "--live",
     ]) == 2
     assert all(call[0][1] != "rm" for call in calls)
+
+
+
+def test_paper_trade_single_file_mount_is_not_live(tmp_path):
+    config = tmp_path / "sample.yml"
+    config.write_text("connector_name: binance_paper_trade\n")
+    inspect = make_inspect()
+    inspect["Mounts"] = [{
+        "Source": str(config),
+        "Destination": "/home/hummingbot/conf/controllers/sample.yml",
+        "Mode": "rw",
+    }]
+    assert not is_live_deployment(inspect)
