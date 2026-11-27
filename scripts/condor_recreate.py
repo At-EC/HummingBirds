@@ -86,12 +86,17 @@ def bootstrap_open_orders(container_name, controller_id, trading_pair):
     source = pathlib.Path(__file__).with_name("condor_bootstrap_recovery.py").read_text(
         encoding="utf-8"
     )
-    result = subprocess.run([
+    command = [
         "docker", "exec", "-i", container_name,
         "/opt/conda/envs/hummingbot/bin/python", "-",
-        "--controller-id", controller_id,
-        "--trading-pair", trading_pair,
-    ], input=source, capture_output=True, text=True, check=False)
+    ]
+    if controller_id:
+        command += ["--controller-id", controller_id]
+    if trading_pair:
+        command += ["--trading-pair", trading_pair]
+    result = subprocess.run(
+        command, input=source, capture_output=True, text=True, check=False
+    )
     if result.returncode != 0:
         raise RuntimeError("Order recovery bootstrap failed; refusing to stop the container")
     print(f"RECOVERY_BOOTSTRAP={result.stdout.strip()}")
@@ -170,8 +175,8 @@ def main(argv=None):
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--keep-open-orders", action="store_true")
-    parser.add_argument("--recovery-controller-id", default="pmm_mister_loss_exit_sample")
-    parser.add_argument("--recovery-trading-pair", default="ZEC-USDT")
+    parser.add_argument("--recovery-controller-id")
+    parser.add_argument("--recovery-trading-pair")
     args = parser.parse_args(argv)
 
     name = args.container

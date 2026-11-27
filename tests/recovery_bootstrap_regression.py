@@ -58,3 +58,22 @@ class RecoveryBootstrapTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RecoveryIdentityTests(unittest.TestCase):
+    def test_identity_is_discovered_from_controller_config(self):
+        import tempfile
+        from pathlib import Path
+        from scripts.condor_bootstrap_recovery import discover_controller_identity
+        with tempfile.TemporaryDirectory() as directory:
+            Path(directory, "sample.yml").write_text(
+                "id: sample_pmm_loss_exit_btc_usdt\n"
+                "connector_name: binance\n"
+                "trading_pair: ZEC-USDT\n"
+            )
+            identity = discover_controller_identity(Path(directory))
+        self.assertEqual(identity, {
+            "id": "sample_pmm_loss_exit_btc_usdt",
+            "connector_name": "binance",
+            "trading_pair": "ZEC-USDT",
+        })

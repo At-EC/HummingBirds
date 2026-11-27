@@ -10,6 +10,24 @@ from hummingbot.strategy_v2.controllers.executor_recovery import ExecutorRecover
 from hummingbot.strategy_v2.executors.position_executor.data_types import PositionExecutorConfig, TripleBarrierConfig
 
 
+def discover_controller_identity(root: Path) -> dict:
+    identities = []
+    for path in sorted(root.glob("*.yml")):
+        values = {}
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            key = key.strip()
+            if key in ("id", "connector_name", "trading_pair"):
+                values[key] = value.strip().strip("'\"")
+        if all(values.get(field) for field in ("id", "connector_name", "trading_pair")):
+            identities.append(values)
+    if len(identities) != 1:
+        raise ValueError(f"Expected one complete controller config, found {len(identities)}")
+    return identities[0]
+
+
 def build_adoption_record(snapshot, connector_name: str, trading_pair: str) -> dict:
     executor_id = "adopted-" + sha256(snapshot.client_order_id.encode()).hexdigest()[:16]
     order_type = OrderType[snapshot.order_type]
@@ -102,24 +120,28 @@ def make_binance_adapter(connector_name: str, trading_pair: str):
 
 
 async def main_async(args):
-    if args.connector_name != "binance":
-        raise ValueError(f"Unsupported recovery connector: {args.connector_name}")
-    adapter = make_binance_adapter(args.connector_name, args.trading_pair)
+    identity = discover_controller_identity(Path("conf/controllers"))
+    controller_id = args.controller_id or identity["id"]
+    connector_name = args.connector_name or identity["connector_name"]
+    trading_pair = args.trading_pair or identity["trading_pair"]
+    if connector_name != "binance":
+        raise ValueError(f"Unsupported recovery connector: {connector_name}")
+    adapter = make_binance_adapter(connector_name, trading_pair)
     snapshots = await adapter.fetch_open_orders()
-    store = ExecutorRecoveryStore(args.controller_id, Path(args.root))
+    store = ExecutorRecoveryStore(controller_id, Path(args.root))
     payload = store.load() or {
         "schema_version": 1,
-        "controller_id": args.controller_id,
-        "connector_name": args.connector_name,
-        "trading_pair": args.trading_pair,
+        "controller_id": controller_id,
+        "connector_name": connector_name,
+        "trading_pair": trading_pair,
         "updated_at": 0.0,
         "executors": [],
     }
     import time
-    added = merge_adoption_records(payload, snapshots, args.controller_id, time.time())
+    added = merge_adoption_records(payload, snapshots, controller_id, time.time())
     store.save(payload)
     print(json.dumps({
-        "controller_id": args.controller_id,
+        "controller_id": controller_id,
         "open_orders": len(snapshots),
         "adopted": added,
         "total_executors": len(payload["executors"]),
@@ -129,10 +151,10 @@ async def main_async(args):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Bootstrap recovery records for existing open orders")
-    parser.add_argument("--controller-id", default="pmm_mister_loss_exit_sample")
+    parser.add_argument("--controller-id")
     parser.add_argument("--root", default="data/pmm_mister_loss_exit/runtime")
-    parser.add_argument("--connector-name", default="binance")
-    parser.add_argument("--trading-pair", default="ZEC-USDT")
+    parser.add_argument("--connector-name")
+    parser.add_argument("--trading-pair")
     args = parser.parse_args(argv)
     return asyncio.run(main_async(args))
 
