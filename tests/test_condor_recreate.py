@@ -226,3 +226,22 @@ def test_keep_stop_is_noop_when_container_already_stopped(monkeypatch):
     monkeypatch.setattr(condor_recreate, "docker", fake_docker)
     condor_recreate.stop_keep_open_orders("demo")
     assert calls == [("inspect", "demo")]
+
+
+
+def test_health_check_accepts_pmm_strategy_log(monkeypatch, tmp_path):
+    (tmp_path / "logs_pmm_mister_loss_exit_sample.log").write_text(
+        "strategy execution started\n"
+    )
+    inspect = make_inspect()
+    inspect["Mounts"] = [{
+        "Source": str(tmp_path), "Destination": "/home/hummingbot/logs", "Mode": "rw",
+    }]
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": True, "ExitCode": 0}}])
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    healthy, detail = health_check(inspect)
+    assert healthy, detail

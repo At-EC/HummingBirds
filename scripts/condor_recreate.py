@@ -119,7 +119,7 @@ def health_check(inspect):
         if mount["Destination"].rstrip("/") != "/home/hummingbot/logs":
             continue
         files = sorted(
-            pathlib.Path(mount["Source"]).glob("logs_bot_*.log"),
+            pathlib.Path(mount["Source"]).glob("logs_*.log"),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
