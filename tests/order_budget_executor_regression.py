@@ -1,3 +1,4 @@
+import asyncio
 from decimal import Decimal
 from unittest.mock import MagicMock, PropertyMock, patch
 
@@ -108,3 +109,20 @@ def test_loss_exit_order_is_allowed_during_budget_pause():
     executor.place_take_profit_limit_order(amount=Decimal("1"), price=Decimal("100"))
 
     assert executor._take_profit_limit_order is not None
+
+
+def test_preflight_insufficient_balance_pauses_controller():
+    OrderBudgetGuard.reset()
+    executor = make_executor(no_budget_retry_seconds=30)
+    adjusted_candidate = MagicMock()
+    adjusted_candidate.amount = Decimal("0")
+    executor.adjust_order_candidates = MagicMock(return_value=[adjusted_candidate])
+    executor.stop = MagicMock()
+
+    asyncio.run(executor.validate_sufficient_balance())
+
+    assert executor.close_type.name == "INSUFFICIENT_BALANCE"
+    executor.stop.assert_called_once()
+    assert OrderBudgetGuard.is_paused("bot-a", 101.0)
+    assert OrderBudgetGuard.is_paused("bot-a", 129.9)
+    assert not OrderBudgetGuard.is_paused("bot-a", 130.0)

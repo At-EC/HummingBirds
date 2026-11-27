@@ -1275,7 +1275,14 @@ class PositionExecutor(ExecutorBase):
         adjusted_order_candidates = self.adjust_order_candidates(self.config.connector_name, [order_candidate])
         if adjusted_order_candidates[0].amount == Decimal("0"):
             self.close_type = CloseType.INSUFFICIENT_BALANCE
-            self.logger().error("Not enough budget to open position.")
+            message = "Not enough budget to open position."
+            OrderBudgetGuard.note_no_budget(
+                self.config.controller_id,
+                self._strategy.current_timestamp,
+                self.config.no_budget_retry_seconds,
+                message,
+            )
+            self.logger().error(message)
             self.stop()
 
     async def _sleep(self, delay: float):
