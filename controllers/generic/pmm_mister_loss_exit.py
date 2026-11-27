@@ -398,7 +398,11 @@ class PMMisterLossExit(_pmm_mister.PMMister):
             "updated_at": self.market_data_provider.time(),
             "executors": executor_snapshots,
         }
-        self._recovery_coordinator.store.save(payload)
+        try:
+            self._recovery_coordinator.store.save(payload)
+        except Exception as error:
+            self.mark_recovery_blocked(str(error))
+            return
         self._recovery_last_snapshots = comparable
 
     def determine_executor_actions(self) -> List[ExecutorAction]:

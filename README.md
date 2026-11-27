@@ -107,7 +107,7 @@ release/pmm-loss-exit-overlay.tar.gz.sha256
 成功输出包含：
 
 ```text
-Runtime files: 11
+Runtime files: 18
 Update verified successfully.
 ```
 
@@ -352,3 +352,63 @@ python3 -m unittest discover -s tests -p 'test_condor_login.py' -v
 ```
 
 该目录仅保存工具和测试，不运行后台服务。日常登录仍在本地 Windows 机器运行脚本。现有 `/root/HummingBirds`、Condor 服务和 Bot 不因登录工具更新而改变。
+
+
+## 11. 保留开放订单与重启恢复（开发分支）
+
+本功能只适用于 `pmm_mister_loss_exit`、Binance 现货和受支持的恢复适配器。默认停止行为不变，仍撤销开放订单；不要将 `SIGKILL` 作为部署方式。
+
+### 前置条件
+
+- 当前容器和目标镜像都包含恢复组件。
+- 第一次升级到恢复版本时，必须使用默认撤单更新；之后才可使用保留订单更新。
+- 保留订单更新前必须通过全部 Paper 场景和只读订单检查。
+- 对账完成前不会创建新订单或激活亏损退出。
+
+### 显式保留订单停止
+
+```bash
+hbot stop --keep-open-orders
+```
+
+普通 `hbot stop` 和 SIGTERM 仍撤销开放订单。保留订单停止使用独立信号并调用 `skip_order_cancellation=True`。
+
+### 保留订单重建
+
+Paper：
+
+```bash
+python3 scripts/condor_recreate.py \
+  --container BOT_NAME --keep-open-orders --yes
+```
+
+实盘必须同时确认：
+
+```bash
+python3 scripts/condor_recreate.py \
+  --container BOT_NAME --keep-open-orders --yes --live
+```
+
+如果原容器或目标镜像缺少恢复组件，脚本会拒绝执行。不得绕过该检查。
+
+### 恢复状态
+
+- `READY`：订单和持仓对账完成，可以恢复交易。
+- `RECONCILING`：正在查询和恢复，不挂新单。
+- `BLOCKED`：存在 UNKNOWN、数量不一致、未跟踪订单或保存失败，不挂新单，也不激活亏损退出。
+
+只读诊断：
+
+```bash
+python3 scripts/condor_recovery_check.py --container BOT_NAME
+```
+
+该命令只读取恢复记录和交易所订单，不写状态、不撤单、不挂单。
+
+### 安全限制
+
+- 首版不支持其他 Connector 或多个 Controller 交叉管理同一交易对。
+- 停止期间全部成交的 TP 不会重挂；部分成交只恢复剩余数量。
+- 外部撤单进入 POSITION_HOLD 收尾，不自动创建新 TP。
+- 不兼容的旧镜像不能用于保留订单回滚；回滚目标也必须包含恢复组件。
+- Paper Trade 的进程内模拟订单不能完全代表交易所真实订单，实盘前仍需 Binance 只读适配器验证和明确批准。

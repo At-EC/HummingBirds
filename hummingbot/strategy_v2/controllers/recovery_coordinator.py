@@ -36,6 +36,16 @@ class RecoveryCoordinator:
             for order_id in self._order_ids(record):
                 snapshots[order_id] = await adapter.fetch_order_snapshot(order_id)
             snapshots_by_executor[record["executor_id"]] = snapshots
+        if hasattr(adapter, "fetch_open_order_ids"):
+            expected_order_ids = {
+                order_id
+                for record in payload["executors"]
+                for order_id in self._order_ids(record)
+            }
+            exchange_order_ids = await adapter.fetch_open_order_ids()
+            unexpected = set(exchange_order_ids) - expected_order_ids
+            if unexpected:
+                raise ValueError(f"Untracked exchange orders: {sorted(unexpected)}")
         self.recovered = {
             "payload": payload,
             "snapshots": snapshots_by_executor,

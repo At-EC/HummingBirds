@@ -163,6 +163,9 @@ class ExecutorRuntimeRestorer:
                 executor._close_order = tracked
                 executor.close_type = CloseType.TAKE_PROFIT
                 executor._status = RunnableStatus.SHUTTING_DOWN
+            elif snapshot.status in ("CANCELED", "FAILED"):
+                executor.close_type = CloseType.POSITION_HOLD
+                executor._status = RunnableStatus.SHUTTING_DOWN
             executor._loss_exit_terminal_order_ids.add(order_id)
         for exit_record in record.get("loss_exit_orders", []):
             order_id = exit_record["client_order_id"]
