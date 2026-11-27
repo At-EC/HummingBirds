@@ -107,7 +107,7 @@ release/pmm-loss-exit-overlay.tar.gz.sha256
 成功输出包含：
 
 ```text
-Runtime files: 21
+Runtime files: 22
 Update verified successfully.
 ```
 

@@ -112,3 +112,17 @@ class BinanceOpenOrdersTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["path_url"], "/openOrders")
         self.assertEqual(kwargs["params"], {"symbol": "ZECUSDT"})
         self.assertTrue(kwargs["is_auth_required"])
+
+
+class BinanceOpenOrderSnapshotTests(unittest.IsolatedAsyncioTestCase):
+    async def test_fetch_open_orders_converts_every_open_order(self):
+        connector = MagicMock()
+        connector.exchange_symbol_associated_to_pair = AsyncMock(return_value="ZECUSDT")
+        connector._api_get = AsyncMock(return_value=[binance_open_order()])
+        adapter = BinanceOrderRecoveryAdapter(connector, "ZEC-USDT")
+
+        result = await adapter.fetch_open_orders()
+
+        self.assertEqual(len(result), 1)
+        self.assertEqual(result[0].client_order_id, "tp-1")
+        self.assertEqual(result[0].status, "PARTIALLY_FILLED")

@@ -123,3 +123,19 @@ class BinanceOrderRecoveryAdapter:
         except Exception as error:
             raise OrderRecoveryQueryError("Unable to query open orders") from error
         return {str(order["clientOrderId"]) for order in raw_orders}
+
+
+    async def fetch_open_orders(self) -> list[RecoveredOrderSnapshot]:
+        symbol = await self._connector.exchange_symbol_associated_to_pair(
+            trading_pair=self._trading_pair
+        )
+        try:
+            raw_orders = await self._connector._api_get(
+                path_url="/openOrders",
+                params={"symbol": symbol},
+                is_auth_required=True,
+                limit_id=CONSTANTS.ORDER_PATH_URL,
+            )
+        except Exception as error:
+            raise OrderRecoveryQueryError("Unable to query open order snapshots") from error
+        return [self._convert_order(order) for order in raw_orders]

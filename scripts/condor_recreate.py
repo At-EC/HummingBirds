@@ -82,6 +82,21 @@ def stop_keep_open_orders(container_name):
             raise
 
 
+def bootstrap_open_orders(container_name, controller_id, trading_pair):
+    source = pathlib.Path(__file__).with_name("condor_bootstrap_recovery.py").read_text(
+        encoding="utf-8"
+    )
+    result = subprocess.run([
+        "docker", "exec", "-i", container_name,
+        "/opt/conda/envs/hummingbot/bin/python", "-",
+        "--controller-id", controller_id,
+        "--trading-pair", trading_pair,
+    ], input=source, capture_output=True, text=True, check=False)
+    if result.returncode != 0:
+        raise RuntimeError("Order recovery bootstrap failed; refusing to stop the container")
+    print(f"RECOVERY_BOOTSTRAP={result.stdout.strip()}")
+
+
 def recovery_supported(container_name):
     paths = [
         "/home/hummingbot/hummingbot/strategy_v2/controllers/executor_recovery.py",
@@ -155,6 +170,8 @@ def main(argv=None):
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--live", action="store_true")
     parser.add_argument("--keep-open-orders", action="store_true")
+    parser.add_argument("--recovery-controller-id", default="pmm_mister_loss_exit_sample")
+    parser.add_argument("--recovery-trading-pair", default="ZEC-USDT")
     args = parser.parse_args(argv)
 
     name = args.container
@@ -181,6 +198,9 @@ def main(argv=None):
         if not image_supports_recovery(args.image):
             print("Refusing keep-open-orders: target image lacks recovery support")
             return 2
+        bootstrap_open_orders(
+            name, args.recovery_controller_id, args.recovery_trading_pair
+        )
         stop_keep_open_orders(name)
 
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)

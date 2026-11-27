@@ -286,3 +286,23 @@ def test_health_check_accepts_current_container_stdout(monkeypatch):
     healthy, detail = condor_recreate.health_check(inspect)
     assert healthy, detail
     assert calls[1][0] == "logs"
+
+
+
+def test_bootstrap_streams_worker_before_any_stop(monkeypatch):
+    from unittest.mock import MagicMock
+    from scripts import condor_recreate
+
+    class Result:
+        returncode = 0
+        stdout = '{"adopted": 2, "total_executors": 2}'
+        stderr = ""
+
+    runner = MagicMock(return_value=Result())
+    monkeypatch.setattr(subprocess, "run", runner)
+    condor_recreate.bootstrap_open_orders("demo", "pmm_mister_loss_exit_sample", "ZEC-USDT")
+    command = runner.call_args.args[0]
+    assert command[:4] == ["docker", "exec", "-i", "demo"]
+    assert "stop" not in command
+    assert "rm" not in command
+    assert "def build_adoption_record" in runner.call_args.kwargs["input"]

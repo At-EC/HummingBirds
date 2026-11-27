@@ -131,3 +131,20 @@ class PersistenceFailureTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class NormalModePersistenceTests(unittest.TestCase):
+    def test_disabled_recovery_still_saves_current_executor_snapshots_once(self):
+        controller = make_controller(make_config())
+        controller.recovery_state = "DISABLED"
+        controller._recovery_last_snapshots = None
+        controller._recovery_coordinator = MagicMock()
+        controller._recovery_pending = {}
+        controller._recovery_actions = []
+        controller._recovery_task = None
+
+        controller.persist_recovery_snapshots([])
+        controller.persist_recovery_snapshots([])
+
+        controller._recovery_coordinator.store.save.assert_called_once()

@@ -28,6 +28,7 @@ COPY hummingbot/strategy_v2/executors/position_executor/position_executor.py hum
 COPY hummingbot/strategy_v2/executors/position_executor/recovery.py hummingbot/strategy_v2/executors/position_executor/recovery.py
 COPY hummingbot/strategy_v2/models/executor_actions.py hummingbot/strategy_v2/models/executor_actions.py
 COPY scripts/condor_recovery_check.py scripts/condor_recovery_check.py
+COPY scripts/condor_bootstrap_recovery.py scripts/condor_bootstrap_recovery.py
 
 RUN /opt/conda/envs/hummingbot/bin/python -m py_compile \
     controllers/generic/pmm_mister.py \
@@ -49,4 +50,5 @@ RUN /opt/conda/envs/hummingbot/bin/python -m py_compile \
     hummingbot/strategy_v2/executors/position_executor/position_executor.py \
     hummingbot/strategy_v2/executors/position_executor/recovery.py \
     hummingbot/strategy_v2/models/executor_actions.py \
-    scripts/condor_recovery_check.py
+    scripts/condor_recovery_check.py \
+    scripts/condor_bootstrap_recovery.py

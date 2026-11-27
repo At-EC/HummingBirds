@@ -382,7 +382,7 @@ class PMMisterLossExit(_pmm_mister.PMMister):
         return []
 
     def persist_recovery_snapshots(self, executor_snapshots: List[dict]) -> None:
-        if self.recovery_state != "READY":
+        if self.recovery_state not in ("READY", "DISABLED"):
             return
         import json
         comparable = json.dumps(executor_snapshots, sort_keys=True)
