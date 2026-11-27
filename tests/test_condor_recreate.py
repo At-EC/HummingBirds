@@ -245,3 +245,44 @@ def test_health_check_accepts_pmm_strategy_log(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
     healthy, detail = health_check(inspect)
     assert healthy, detail
+
+
+
+def test_health_check_finds_startup_before_busy_order_logs(monkeypatch, tmp_path):
+    lines = ["strategy execution started\n"]
+    lines.extend(f"order filled {index}\n" for index in range(150))
+    (tmp_path / "logs_bot_demo.log").write_text("".join(lines))
+    inspect = make_inspect()
+    inspect["Mounts"] = [{
+        "Source": str(tmp_path), "Destination": "/home/hummingbot/logs", "Mode": "rw",
+    }]
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": True, "ExitCode": 0}}])
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    healthy, detail = health_check(inspect)
+    assert healthy, detail
+
+
+
+def test_health_check_accepts_current_container_stdout(monkeypatch):
+    from scripts import condor_recreate
+    inspect = make_inspect()
+    calls = []
+
+    def fake_docker(*args):
+        calls.append(args)
+        if args[0] == "inspect":
+            return json.dumps([{
+                "State": {"Running": True, "ExitCode": 0, "StartedAt": "2026-11-27T09:00:00Z"},
+            }])
+        if args[0] == "logs":
+            return "'v2_with_controllers' strategy execution started."
+        raise AssertionError("health check must not require a log mount")
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    healthy, detail = condor_recreate.health_check(inspect)
+    assert healthy, detail
+    assert calls[1][0] == "logs"

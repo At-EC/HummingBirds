@@ -115,6 +115,15 @@ def health_check(inspect):
     state = json.loads(docker("inspect", inspect["Name"].lstrip("/")))[0]["State"]
     if not state.get("Running"):
         return False, f"container is not running (exit={state.get('ExitCode')})"
+    name = inspect["Name"].lstrip("/")
+    try:
+        stdout = docker("logs", "--since", state["StartedAt"], name)
+        if "Input is not a terminal" in stdout or "Failed to start strategy" in stdout:
+            return False, "strategy startup failed"
+        if "strategy execution started" in stdout:
+            return True, "healthy"
+    except (subprocess.CalledProcessError, KeyError):
+        pass
     for mount in inspect["Mounts"]:
         if mount["Destination"].rstrip("/") != "/home/hummingbot/logs":
             continue
@@ -125,12 +134,16 @@ def health_check(inspect):
         )
         if not files:
             return False, "no strategy log found"
-        lines = files[0].read_text(encoding="utf-8").splitlines()[-100:]
-        text = "\n".join(lines)
+        lines = files[0].read_text(encoding="utf-8").splitlines()
+        startup_lines = [
+            index for index, line in enumerate(lines)
+            if "strategy execution started" in line
+        ]
+        if not startup_lines:
+            return False, "strategy did not start"
+        text = "\n".join(lines[startup_lines[-1]:])
         if "Input is not a terminal" in text or "Failed to start strategy" in text:
             return False, "strategy startup failed"
-        if "strategy execution started" not in text:
-            return False, "strategy did not start"
         return True, "healthy"
     return False, "log mount not found"
 
