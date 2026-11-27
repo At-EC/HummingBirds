@@ -154,19 +154,22 @@ def test_keep_stop_accepts_137_only_when_container_stopped(monkeypatch):
     from scripts import condor_recreate
     calls = []
 
+    states = iter([True, False])
+
     class Result:
-        stdout = json.dumps([{"State": {"Running": False}}])
-        stderr = ""
+        def __init__(self, running):
+            self.stdout = json.dumps([{"State": {"Running": running}}])
+            self.stderr = ""
 
     def fake_docker(*args):
         calls.append(args)
         if args[0] == "exec":
             raise subprocess.CalledProcessError(137, args, stderr="container exited")
-        return Result().stdout
+        return Result(next(states)).stdout
 
     monkeypatch.setattr(condor_recreate, "docker", fake_docker)
     condor_recreate.stop_keep_open_orders("demo")
-    assert calls[1] == ("inspect", "demo")
+    assert calls[-1] == ("inspect", "demo")
 
 
 def test_keep_stop_rejects_137_while_container_is_running(monkeypatch):
@@ -207,3 +210,19 @@ def test_recovery_support_check_uses_docker_cp_for_stopped_container(monkeypatch
     assert condor_recreate.recovery_supported("demo")
     assert all(call[0] == "cp" for call in calls)
     assert all(call[1].startswith("demo:") for call in calls)
+
+
+
+def test_keep_stop_is_noop_when_container_already_stopped(monkeypatch):
+    from scripts import condor_recreate
+    calls = []
+
+    def fake_docker(*args):
+        calls.append(args)
+        if args[0] == "inspect":
+            return json.dumps([{"State": {"Running": False}}])
+        raise AssertionError("stop must not be executed for a stopped container")
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    condor_recreate.stop_keep_open_orders("demo")
+    assert calls == [("inspect", "demo")]

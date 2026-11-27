@@ -66,6 +66,9 @@ def write_environment(inspect, env_file, keep_open_orders=False):
 
 
 def stop_keep_open_orders(container_name):
+    state = json.loads(docker("inspect", container_name))[0]["State"]
+    if not state.get("Running"):
+        return
     try:
         docker(
             "exec", container_name, "/opt/conda/envs/hummingbot/bin/hbot", "stop",
