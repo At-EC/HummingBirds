@@ -14,6 +14,9 @@ COPY hummingbot/data_feed/market_data_provider.py hummingbot/data_feed/market_da
 COPY hummingbot/connector/exchange/binance/binance_order_recovery.py hummingbot/connector/exchange/binance/binance_order_recovery.py
 COPY hummingbot/cli/engine.py hummingbot/cli/engine.py
 COPY hummingbot/cli/commands/stop.py hummingbot/cli/commands/stop.py
+COPY hummingbot/client/command/stop_command.py hummingbot/client/command/stop_command.py
+COPY hummingbot/core/trading_core.py hummingbot/core/trading_core.py
+COPY hummingbot/strategy/strategy_v2_base.py hummingbot/strategy/strategy_v2_base.py
 COPY hummingbot/strategy_v2/controllers/order_budget.py hummingbot/strategy_v2/controllers/order_budget.py
 COPY hummingbot/strategy_v2/controllers/loss_exit_recovery.py hummingbot/strategy_v2/controllers/loss_exit_recovery.py
 COPY hummingbot/strategy_v2/controllers/executor_recovery.py hummingbot/strategy_v2/controllers/executor_recovery.py
@@ -33,6 +36,9 @@ RUN /opt/conda/envs/hummingbot/bin/python -m py_compile \
     hummingbot/connector/exchange/binance/binance_order_recovery.py \
     hummingbot/cli/engine.py \
     hummingbot/cli/commands/stop.py \
+    hummingbot/client/command/stop_command.py \
+    hummingbot/core/trading_core.py \
+    hummingbot/strategy/strategy_v2_base.py \
     hummingbot/strategy_v2/controllers/order_budget.py \
     hummingbot/strategy_v2/controllers/loss_exit_recovery.py \
     hummingbot/strategy_v2/controllers/executor_recovery.py \

@@ -51,3 +51,54 @@ def test_sigusr2_skips_order_cancellation():
     hb = run_serve(signal.SIGUSR2)
     hb.stop_loop.assert_awaited_once_with(skip_order_cancellation=True)
     hb.trading_core.shutdown.assert_awaited_once_with(skip_order_cancellation=True)
+
+
+from hummingbot.strategy.strategy_v2_base import StrategyV2Base
+from hummingbot.strategy_v2.executors.executor_orchestrator import ExecutorOrchestrator
+from hummingbot.strategy_v2.models.base import RunnableStatus
+
+
+def test_v2_strategy_forwards_keep_open_orders_to_orchestrator():
+    async def run_test():
+        orchestrator = MagicMock()
+        orchestrator.stop = AsyncMock()
+        factory = MagicMock(return_value=orchestrator)
+        with patch(
+            "hummingbot.strategy.strategy_v2_base._get_executor_orchestrator_class",
+            return_value=factory,
+        ):
+            strategy = StrategyV2Base(connectors={})
+        strategy.controllers = {}
+        strategy.listen_to_executor_actions_task = None
+        strategy.max_executors_close_attempts = 3
+        strategy.executor_orchestrator = orchestrator
+        strategy.market_data_provider = MagicMock()
+        strategy.mqtt_enabled = False
+
+        await strategy.on_stop(skip_order_cancellation=True)
+
+        strategy.executor_orchestrator.stop.assert_awaited_once_with(
+            3, skip_order_cancellation=True
+        )
+
+    asyncio.run(run_test())
+
+
+def test_orchestrator_keep_open_orders_stops_without_early_stop():
+    controller = MagicMock()
+    executor = MagicMock()
+    executor.is_closed = False
+    executor.status = RunnableStatus.RUNNING
+    orchestrator = object.__new__(ExecutorOrchestrator)
+    orchestrator.active_executors = {"bot-a": [executor]}
+    orchestrator.strategy = MagicMock()
+    orchestrator.strategy.controllers = {"bot-a": controller}
+    orchestrator.store_all_positions = MagicMock()
+    orchestrator.store_all_executors = MagicMock()
+    orchestrator.logger = MagicMock(return_value=MagicMock())
+
+    asyncio.run(orchestrator.stop(skip_order_cancellation=True))
+
+    executor.early_stop.assert_not_called()
+    executor.stop.assert_called_once()
+    controller.persist_recovery_snapshots.assert_called_once()

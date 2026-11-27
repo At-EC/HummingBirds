@@ -395,7 +395,7 @@ class ExecutorOrchestrator:
                 ))
         return tuple(signature)
 
-    async def stop(self, max_executors_close_attempts: int = 3):
+    async def stop(self, max_executors_close_attempts: int = 3, skip_order_cancellation: bool = False):
         """
         Stop the orchestrator task and all active executors.
 
@@ -405,6 +405,16 @@ class ExecutorOrchestrator:
         is force-stopped synchronously, converting whatever it executed into a
         position hold so no exposure goes untracked.
         """
+        if skip_order_cancellation:
+            self._persist_recovery_snapshots()
+            for executors_list in self.active_executors.values():
+                for executor in executors_list:
+                    executor.stop()
+            self.store_all_positions()
+            self.store_all_executors()
+            self.active_executors.clear()
+            return
+
         for controller_id, executors_list in self.active_executors.items():
             for executor in executors_list:
                 if executor.is_closed or executor.status == RunnableStatus.SHUTTING_DOWN:
