@@ -64,6 +64,20 @@ def write_environment(inspect, env_file, keep_open_orders=False):
     os.chmod(env_file, 0o600)
 
 
+def stop_keep_open_orders(container_name):
+    try:
+        docker(
+            "exec", container_name, "/opt/conda/envs/hummingbot/bin/hbot", "stop",
+            "--keep-open-orders", "--timeout", "60",
+        )
+    except subprocess.CalledProcessError as error:
+        if error.returncode != 137:
+            raise
+        state = json.loads(docker("inspect", container_name))[0]["State"]
+        if state.get("Running"):
+            raise
+
+
 def recovery_supported(container_name):
     paths = [
         "/home/hummingbot/hummingbot/strategy_v2/controllers/executor_recovery.py",
@@ -147,10 +161,7 @@ def main(argv=None):
         if not image_supports_recovery(args.image):
             print("Refusing keep-open-orders: target image lacks recovery support")
             return 2
-        docker(
-            "exec", name, "/opt/conda/envs/hummingbot/bin/hbot", "stop",
-            "--keep-open-orders", "--timeout", "60",
-        )
+        stop_keep_open_orders(name)
 
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
     ENV_ROOT.mkdir(parents=True, exist_ok=True)

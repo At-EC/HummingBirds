@@ -147,3 +147,44 @@ def test_paper_trade_single_file_mount_is_not_live(tmp_path):
         "Mode": "rw",
     }]
     assert not is_live_deployment(inspect)
+
+
+
+def test_keep_stop_accepts_137_only_when_container_stopped(monkeypatch):
+    from scripts import condor_recreate
+    calls = []
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": False}}])
+        stderr = ""
+
+    def fake_docker(*args):
+        calls.append(args)
+        if args[0] == "exec":
+            raise subprocess.CalledProcessError(137, args, stderr="container exited")
+        return Result().stdout
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    condor_recreate.stop_keep_open_orders("demo")
+    assert calls[1] == ("inspect", "demo")
+
+
+def test_keep_stop_rejects_137_while_container_is_running(monkeypatch):
+    from scripts import condor_recreate
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": True}}])
+        stderr = ""
+
+    def fake_docker(*args):
+        if args[0] == "exec":
+            raise subprocess.CalledProcessError(137, args, stderr="container exited")
+        return Result().stdout
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    try:
+        condor_recreate.stop_keep_open_orders("demo")
+    except subprocess.CalledProcessError:
+        pass
+    else:
+        raise AssertionError("running container was accepted as stopped")
