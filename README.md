@@ -27,12 +27,14 @@ agents/_shared/skills/pmm_mister_loss_exit/
 Dockerfile                          # 固定已验证的 2.17.0 基础镜像 digest
 package_release.sh                  # 生成 overlay 发布包
 install_loss_exit.sh                # 独立容器覆盖安装与回滚
+condor_login.py                     # 可重复使用的 Condor SSH 临时登录工具
+condor_login.cmd                    # Windows 双击启动器
 scripts/
   setup_condor.sh                   # 注册 Condor Controller 和示例配置
   condor_recreate.py                # 保留实例配置，替换镜像并健康检查
   test_release_scripts.sh
   test_overlay_container.sh
-tests/                              # 策略与部署脚本回归测试
+tests/                              # 策略、部署脚本与登录工具回归测试
 ```
 
 当前自定义镜像：
@@ -229,6 +231,7 @@ python -m pytest tests/test_condor_recreate.py -q
 python -m pytest tests/order_budget_regression.py \
   tests/order_budget_controller_regression.py \
   tests/order_budget_executor_regression.py -q
+python -m unittest discover -s tests -p 'test_condor_login.py' -v
 bash scripts/test_release_scripts.sh
 TEST_IMAGE=hummingbot/pmm-mister-loss-exit:v2.17.0 \
   bash scripts/test_overlay_container.sh
@@ -278,3 +281,74 @@ Paper Trade 与实盘的区别：
 - [ ] 已确认无界面启动与策略健康检查通过。
 - [ ] 已知备份位置和回滚命令。
 - [ ] 首次实盘使用小资金并持续观察日志。
+
+## 10. Condor 临时登录工具
+
+`condor_login.py` 通过 SSH 生成 24 小时管理员会话、建立隧道并打开本地 Condor 页面，无需 Telegram，也不修改服务器认证配置或 Bot。
+
+### Windows 双击使用
+
+直接双击仓库根目录的 `condor_login.cmd`。启动器自动寻找 Python 3，并将参数传给 `condor_login.py`。
+
+默认读取以下本地文件：
+
+```text
+ssh/id_ed25519
+ssh/known_hosts
+```
+
+这些文件是本地私密配置，不在仓库中，不要提交或分享。需要指定其他路径时，在终端执行：
+
+```powershell
+python condor_login.py --key "C:\path\id_ed25519" --known-hosts "C:\path\known_hosts"
+```
+
+### 命令行使用
+
+```bash
+python condor_login.py
+```
+
+脚本自动打开 `http://localhost:18082/`。保持终端运行以维持本地访问，按 `Ctrl+C` 清理临时代理和脚本创建的 SSH 隧道。会话过期后重新运行即可。
+
+可选参数：
+
+| 参数 | 默认值 | 用途 |
+|---|---|---|
+| `--host` | `103.193.150.25` | SSH 服务器地址 |
+| `--user` | `root` | SSH 用户 |
+| `--key` | `ssh/id_ed25519` | 本地 SSH 私钥 |
+| `--known-hosts` | `ssh/known_hosts` | 本地服务器指纹文件 |
+| `--port` | `18082` | 本地 Condor 访问端口 |
+| `--no-open` | 关闭 | 不自动打开浏览器 |
+
+端口被占用时换用其他端口：
+
+```bash
+python condor_login.py --port 18083
+```
+
+安全行为：
+
+- JWT 只用于内存中的一次性同源登录，不出现在 URL、日志或磁盘文件中。
+- 代理仅监听 `127.0.0.1`，不能从局域网或公网访问。
+- 强制校验 SSH 主机指纹，不自动接受新指纹。
+- 脚本只终止自己创建的隧道，不影响已有连接。
+
+### 服务器部署目录
+
+登录工具的独立服务器副本位于：
+
+```text
+/root/condor-login
+```
+
+更新该副本：
+
+```bash
+cd /root/condor-login
+git pull --ff-only
+python3 -m unittest discover -s tests -p 'test_condor_login.py' -v
+```
+
+该目录仅保存工具和测试，不运行后台服务。日常登录仍在本地 Windows 机器运行脚本。现有 `/root/HummingBirds`、Condor 服务和 Bot 不因登录工具更新而改变。
