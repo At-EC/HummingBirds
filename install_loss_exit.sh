@@ -27,6 +27,7 @@ paths=(
   hummingbot/strategy_v2/executors/position_executor/position_executor.py
   hummingbot/strategy_v2/executors/position_executor/recovery.py
   hummingbot/strategy_v2/models/executor_actions.py
+  scripts/condor_recovery_check.py
 )
 
 usage() {
