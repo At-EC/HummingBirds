@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import subprocess
+import tempfile
 import time
 
 DEFAULT_IMAGE = "hummingbot/pmm-mister-loss-exit:v2.17.0"
@@ -84,8 +85,11 @@ def recovery_supported(container_name):
         "/home/hummingbot/hummingbot/connector/exchange/binance/binance_order_recovery.py",
     ]
     try:
-        for path in paths:
-            docker("exec", container_name, "test", "-f", path)
+        with tempfile.TemporaryDirectory(prefix="condor-recovery-probe-") as directory:
+            for path in paths:
+                docker("cp", f"{container_name}:{path}", directory)
+                if not (pathlib.Path(directory) / pathlib.Path(path).name).is_file():
+                    return False
         return True
     except subprocess.CalledProcessError:
         return False

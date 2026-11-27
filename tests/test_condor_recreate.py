@@ -188,3 +188,22 @@ def test_keep_stop_rejects_137_while_container_is_running(monkeypatch):
         pass
     else:
         raise AssertionError("running container was accepted as stopped")
+
+
+
+def test_recovery_support_check_uses_docker_cp_for_stopped_container(monkeypatch):
+    from scripts import condor_recreate
+    calls = []
+
+    def fake_docker(*args):
+        calls.append(args)
+        source = args[1].split(":", 1)[1]
+        from pathlib import Path
+        target = Path(args[-1])
+        (target / source.rsplit("/", 1)[-1]).touch()
+        return ""
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    assert condor_recreate.recovery_supported("demo")
+    assert all(call[0] == "cp" for call in calls)
+    assert all(call[1].startswith("demo:") for call in calls)
