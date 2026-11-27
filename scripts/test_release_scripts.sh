@@ -33,6 +33,7 @@ paths=(
 
 for path in "${paths[@]}"; do
   tar -tzf release/pmm-loss-exit-overlay.tar.gz | grep -Fx "home/hummingbot/$path" >/dev/null
+  grep -F "COPY $path $path" Dockerfile >/dev/null
 done
 
 tar -tzf release/pmm-loss-exit-overlay.tar.gz | grep -Fx "install_loss_exit.sh" >/dev/null
