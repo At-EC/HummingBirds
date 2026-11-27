@@ -106,3 +106,31 @@ def test_health_check_rejects_failed_strategy(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
     healthy, _ = health_check(inspect)
     assert not healthy
+
+
+
+def test_environment_keep_open_orders_is_opt_in_and_removed_by_default(tmp_path):
+    from scripts.condor_recreate import write_environment
+    env_file = tmp_path / "bot.env"
+    inspect = make_inspect()
+    inspect["Config"]["Env"] = ["HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN=true"]
+    write_environment(inspect, env_file, keep_open_orders=False)
+    assert "HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN" not in env_file.read_text()
+    write_environment(inspect, env_file, keep_open_orders=True)
+    assert "HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN=true" in env_file.read_text()
+
+
+def test_keep_open_orders_refuses_incompatible_original(monkeypatch):
+    from scripts import condor_recreate
+    calls = []
+
+    class Result:
+        stdout = json.dumps([make_inspect()])
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: calls.append(args) or Result())
+    monkeypatch.setattr(condor_recreate, "recovery_supported", lambda _: False)
+    assert main([
+        "--container", "demo", "--keep-open-orders", "--yes", "--live",
+    ]) == 2
+    assert all(call[0][1] != "rm" for call in calls)

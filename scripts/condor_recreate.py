@@ -44,12 +44,43 @@ def is_live_deployment(inspect):
     return True
 
 
-def write_environment(inspect, env_file):
-    lines = list(inspect["Config"].get("Env") or [])
+def write_environment(inspect, env_file, keep_open_orders=False):
+    lines = [
+        line for line in (inspect["Config"].get("Env") or [])
+        if not line.startswith("HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN=")
+    ]
     if not any(line.startswith("HEADLESS_MODE=") for line in lines):
         lines.append("HEADLESS_MODE=true")
+    if keep_open_orders:
+        lines.append("HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN=true")
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     os.chmod(env_file, 0o600)
+
+
+def recovery_supported(container_name):
+    paths = [
+        "/home/hummingbot/hummingbot/strategy_v2/controllers/executor_recovery.py",
+        "/home/hummingbot/hummingbot/connector/exchange/binance/binance_order_recovery.py",
+    ]
+    try:
+        for path in paths:
+            docker("exec", container_name, "test", "-f", path)
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def image_supports_recovery(image):
+    paths = [
+        "/home/hummingbot/hummingbot/strategy_v2/controllers/executor_recovery.py",
+        "/home/hummingbot/hummingbot/connector/exchange/binance/binance_order_recovery.py",
+    ]
+    try:
+        for path in paths:
+            docker("run", "--rm", image, "test", "-f", path)
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 
 def health_check(inspect):
@@ -82,6 +113,7 @@ def main(argv=None):
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--live", action="store_true")
+    parser.add_argument("--keep-open-orders", action="store_true")
     args = parser.parse_args(argv)
 
     name = args.container
@@ -101,6 +133,17 @@ def main(argv=None):
     if live and not args.live:
         print("Refusing live deployment without --live")
         return 2
+    if args.keep_open_orders:
+        if not recovery_supported(name):
+            print("Refusing keep-open-orders: current container lacks recovery support")
+            return 2
+        if not image_supports_recovery(args.image):
+            print("Refusing keep-open-orders: target image lacks recovery support")
+            return 2
+        docker(
+            "exec", name, "/opt/conda/envs/hummingbot/bin/hbot", "stop",
+            "--keep-open-orders", "--timeout", "60",
+        )
 
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
     ENV_ROOT.mkdir(parents=True, exist_ok=True)
@@ -108,7 +151,7 @@ def main(argv=None):
     os.chmod(ENV_ROOT, 0o700)
     (BACKUP_ROOT / f"{name}.json").write_text(json.dumps(inspect, indent=2), encoding="utf-8")
     env_file = ENV_ROOT / f"{name}.env"
-    write_environment(inspect, env_file)
+    write_environment(inspect, env_file, keep_open_orders=args.keep_open_orders)
     docker("rm", "-f", name)
     try:
         container_id = docker(*build_run_args(inspect, env_file, args.image))

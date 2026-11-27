@@ -1,0 +1,51 @@
+"""``hbot stop`` — gracefully stop the running bot (cancels open orders)."""
+import os
+import signal
+import time
+
+import typer
+
+from hummingbot.cli import bot
+from hummingbot.cli.output import ExitCode, emit, fail, json_option, render_kv
+
+
+def stop(
+    timeout: float = typer.Option(30.0, "--timeout", help="Seconds to wait for graceful shutdown."),
+    force: bool = typer.Option(False, "--force", help="SIGKILL if still alive after timeout."),
+    keep_open_orders: bool = typer.Option(
+        False, "--keep-open-orders", help="Stop without cancelling open orders."
+    ),
+    as_json: bool = json_option(),
+) -> None:
+    """Stop the bot gracefully, cancelling open orders unless explicitly preserved."""
+    if not bot.exists():
+        fail("no bot has been started", ExitCode.NOT_FOUND)
+
+    # is_engine_pid (not just pid_alive): after an abrupt kill or container restart the recorded pid
+    # can be reused by an unrelated process — never signal a stranger.
+    pid = bot.read_pid()
+    if pid is None or not bot.is_engine_pid(pid):
+        bot.clear_pid()
+        fail("the bot is not running", ExitCode.NOT_RUNNING)
+
+    os.kill(pid, signal.SIGUSR2 if keep_open_orders else signal.SIGTERM)
+
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        if not bot.pid_alive(pid):
+            break
+        time.sleep(0.5)
+
+    killed = False
+    if bot.pid_alive(pid):
+        if force:
+            os.kill(pid, signal.SIGKILL)
+            time.sleep(0.5)
+            killed = True
+        else:
+            fail(f"the bot did not stop within {timeout:g}s (use --force to SIGKILL)",
+                 ExitCode.TIMEOUT)
+
+    bot.clear_pid()
+    record = {"stopped": True, "killed": killed}
+    emit(record, render_kv(record, title="stop"), as_json)
