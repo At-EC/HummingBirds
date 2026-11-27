@@ -569,8 +569,22 @@ class ExecutorOrchestrator:
         """
         Execute a list of actions.
         """
+        self._persist_recovery_snapshots()
         for action in actions:
             self.execute_action(action)
+
+    def _persist_recovery_snapshots(self):
+        for controller_id, executors in self.active_executors.items():
+            controller = self.strategy.controllers.get(controller_id)
+            persist = getattr(controller, "persist_recovery_snapshots", None)
+            if persist is None:
+                continue
+            snapshots = [
+                executor.snapshot_recovery_state()
+                for executor in executors
+                if hasattr(executor, "snapshot_recovery_state")
+            ]
+            persist(snapshots)
 
     def create_executor(self, action: CreateExecutorAction):
         """
@@ -594,8 +608,22 @@ class ExecutorOrchestrator:
         else:
             raise ValueError("Unsupported executor config type")
 
+        controller = self.strategy.controllers.get(controller_id)
+        recovery_getter = getattr(controller, "get_recovery_restore_data", None)
+        recovery_data = recovery_getter(executor_config.id) if recovery_getter else None
+        if recovery_data is not None:
+            try:
+                executor.restore_recovery_state(
+                    recovery_data["record"], recovery_data["snapshots"]
+                )
+            except Exception as error:
+                controller.mark_recovery_blocked(str(error))
+                self.logger().error(f"Executor recovery blocked for {executor_config.id}: {error}")
+                return
         executor.start()
         self.active_executors[controller_id].append(executor)
+        if recovery_data is not None:
+            controller.complete_recovery_executor(executor_config.id)
         # MarketsRecorder.get_instance().store_or_update_executor(executor)
         self.logger().debug(f"Created {type(executor).__name__} for controller {controller_id}")
 

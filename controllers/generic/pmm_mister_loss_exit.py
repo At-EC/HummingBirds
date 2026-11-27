@@ -1,18 +1,25 @@
+import asyncio
 import math
+import os
 from decimal import Decimal, InvalidOperation
+from pathlib import Path
 from typing import List, Optional
 
 from pydantic import Field, field_validator, model_validator
 
 from controllers.generic import pmm_mister as _pmm_mister
 from hummingbot.core.data_type.common import TradeType
+from hummingbot.strategy_v2.controllers.executor_recovery import ExecutorRecoveryStore
 from hummingbot.strategy_v2.controllers.loss_exit_recovery import LossExitRecoveryStore
 from hummingbot.strategy_v2.controllers.order_budget import OrderBudgetGuard
+from hummingbot.strategy_v2.controllers.recovery_coordinator import RecoveryCoordinator
 from hummingbot.strategy_v2.executors.data_types import PositionSummary
-from hummingbot.strategy_v2.executors.position_executor.data_types import LossExitConfig
+from hummingbot.strategy_v2.executors.position_executor.data_types import LossExitConfig, PositionExecutorConfig
 from hummingbot.strategy_v2.executors.position_executor.loss_exit import LossExitState
+from hummingbot.strategy_v2.executors.position_executor.recovery import ExecutorRuntimeRestorer
 from hummingbot.strategy_v2.models.executor_actions import (
     ActivateLossExitAction,
+    CreateExecutorAction,
     ExecutorAction,
     StopExecutorAction,
 )
@@ -75,6 +82,31 @@ class PMMisterLossExit(_pmm_mister.PMMister):
         self._loss_exit_runtime_owns_record = False
         self._loss_exit_recovery_executor_id: Optional[str] = None
         self._loss_exit_recovery_logged = False
+        self.recovery_state = (
+            "PENDING"
+            if os.getenv("HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN", "").lower() == "true"
+            else "DISABLED"
+        )
+        self._recovery_pending = {}
+        self._recovery_actions = []
+        self._recovery_task = None
+        self._recovery_last_snapshots = None
+        store = ExecutorRecoveryStore(
+            config.id, Path("data/pmm_mister_loss_exit/runtime")
+        )
+
+        def adapter_factory():
+            if config.connector_name != "binance":
+                raise ValueError(f"Unsupported recovery connector: {config.connector_name}")
+            from hummingbot.connector.exchange.binance.binance_order_recovery import (
+                BinanceOrderRecoveryAdapter,
+            )
+            connector = self.market_data_provider.get_connector(config.connector_name)
+            return BinanceOrderRecoveryAdapter(connector, config.trading_pair)
+
+        self._recovery_coordinator = RecoveryCoordinator(
+            store, adapter_factory, ExecutorRuntimeRestorer
+        )
 
     def _get_open_tp_prices(self, side: Optional[TradeType] = None) -> List[Decimal]:
         prices = []
@@ -122,6 +154,8 @@ class PMMisterLossExit(_pmm_mister.PMMister):
         return self._is_tp_distance_conflict(expected_tp_price, tp_side)
 
     def get_executor_config(self, level_id: str, price: Decimal, amount: Decimal):
+        if self.recovery_state not in ("READY", "DISABLED"):
+            return None
         now = self.market_data_provider.time()
         if OrderBudgetGuard.is_paused(self.config.id, now):
             return None
@@ -183,6 +217,8 @@ class PMMisterLossExit(_pmm_mister.PMMister):
     def get_loss_exit_activation_action(self) -> Optional[ActivateLossExitAction]:
         # Loss exit must remain available during a budget pause: it cancels
         # the original TP and replaces it to release inventory and budget.
+        if self.recovery_state not in ("READY", "DISABLED"):
+            return None
         if self.config.manual_kill_switch or self._global_close_phase is not None:
             return None
         if self._loss_exit_runtime_owns_record:
@@ -303,7 +339,71 @@ class PMMisterLossExit(_pmm_mister.PMMister):
         if active is not None:
             self._save_loss_exit_recovery(active.id, active)
 
+    def mark_recovery_blocked(self, error: str) -> None:
+        self.recovery_state = "BLOCKED"
+        self.logger().error(f"Order recovery blocked: {error}")
+
+    def get_recovery_restore_data(self, executor_id: str):
+        return self._recovery_pending.get(executor_id)
+
+    def complete_recovery_executor(self, executor_id: str) -> None:
+        self._recovery_pending.pop(executor_id, None)
+        if not self._recovery_pending and self.recovery_state == "RESTORING":
+            self.recovery_state = "READY"
+
+    async def _prepare_recovery_actions(self) -> None:
+        try:
+            recovered = await self._recovery_coordinator.load_snapshots()
+            if recovered is None:
+                self.recovery_state = "READY"
+                return
+            actions = []
+            for record in recovered["payload"]["executors"]:
+                executor_id = record["executor_id"]
+                executor_config = PositionExecutorConfig(**record["executor_config"])
+                self._recovery_pending[executor_id] = {
+                    "record": record,
+                    "snapshots": recovered["snapshots"][executor_id],
+                }
+                actions.append(CreateExecutorAction(
+                    controller_id=self.config.id,
+                    executor_config=executor_config,
+                ))
+            self._recovery_actions = actions
+            self.recovery_state = "RESTORING"
+        except Exception as error:
+            self.mark_recovery_blocked(str(error))
+
+    def _recovery_actions_step(self) -> List[ExecutorAction]:
+        if self.recovery_state == "PENDING":
+            self.recovery_state = "RECONCILING"
+            self._recovery_task = asyncio.create_task(self._prepare_recovery_actions())
+        elif self.recovery_state == "RESTORING":
+            actions, self._recovery_actions = self._recovery_actions, []
+            return actions
+        return []
+
+    def persist_recovery_snapshots(self, executor_snapshots: List[dict]) -> None:
+        if self.recovery_state != "READY":
+            return
+        import json
+        comparable = json.dumps(executor_snapshots, sort_keys=True)
+        if comparable == self._recovery_last_snapshots:
+            return
+        payload = {
+            "schema_version": 1,
+            "controller_id": self.config.id,
+            "connector_name": self.config.connector_name,
+            "trading_pair": self.config.trading_pair,
+            "updated_at": self.market_data_provider.time(),
+            "executors": executor_snapshots,
+        }
+        self._recovery_coordinator.store.save(payload)
+        self._recovery_last_snapshots = comparable
+
     def determine_executor_actions(self) -> List[ExecutorAction]:
+        if self.recovery_state not in ("READY", "DISABLED"):
+            return self._recovery_actions_step()
         actions = super().determine_executor_actions()
         if self._loss_exit_recovery_required:
             if not self._loss_exit_recovery_logged:

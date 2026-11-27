@@ -28,6 +28,7 @@ def make_controller(config):
     controller.executors_info = []
     controller._global_close_phase = None
     controller._loss_exit_runtime_owns_record = False
+    controller.recovery_state = "DISABLED"
     return controller
 
 
