@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock
 from hummingbot.strategy_v2.controllers.recovery_coordinator import RecoveryCoordinator
 from hummingbot.strategy_v2.executors.position_executor.data_types import TripleBarrierConfig
 from hummingbot.strategy_v2.executors.position_executor.recovery import ExecutorRuntimeRestorer, RecoveryBlocked
+from hummingbot.strategy_v2.executors.executor_orchestrator import ExecutorOrchestrator
 from hummingbot.strategy_v2.models.base import RunnableStatus
 from order_budget_controller_regression import make_config, make_controller
 from order_budget_executor_regression import make_executor
@@ -148,3 +149,20 @@ class NormalModePersistenceTests(unittest.TestCase):
         controller.persist_recovery_snapshots([])
 
         controller._recovery_coordinator.store.save.assert_called_once()
+
+
+
+class ExecuteActionPersistenceTests(unittest.TestCase):
+    def test_execute_action_persists_current_snapshots(self):
+        orchestrator = object.__new__(ExecutorOrchestrator)
+        orchestrator._persist_recovery_snapshots = MagicMock()
+        orchestrator.cached_performance = {"bot-a": MagicMock()}
+        orchestrator.active_executors = {"bot-a": []}
+        orchestrator.positions_held = {"bot-a": []}
+        orchestrator.logger = MagicMock(return_value=MagicMock())
+        action = MagicMock()
+        action.controller_id = "bot-a"
+
+        orchestrator.execute_action(action)
+
+        orchestrator._persist_recovery_snapshots.assert_called_once()

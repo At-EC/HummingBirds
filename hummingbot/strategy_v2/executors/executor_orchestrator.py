@@ -531,6 +531,7 @@ class ExecutorOrchestrator:
         """
         Execute the action and handle executors based on action type.
         """
+        self._persist_recovery_snapshots()
         controller_id = action.controller_id
         if controller_id is None:
             self.logger().error(f"Received action with controller_id=None: {action}. "
