@@ -208,7 +208,7 @@ python3 scripts/condor_recreate.py --container BOT_NAME --yes --live
 | `loss_exit_offset_pct` | `0.001` | 退出限价单距离当前盘口 0.1% |
 | `loss_exit_cooldown_seconds` | `60` | 同一退出订单两次实际重挂的最小间隔 |
 | `loss_exit_activation_delay_seconds` | `60` | 浮亏必须连续满足 60 秒才可成为候选 |
-| `tp_order_distance_tolerance_pct` | `0.001` | 新挂单与开放 TP，或其成交后预期 TP 与已有同向开放 TP，距离小于 0.1% 时跳过该档位；`0` 禁用 |
+| `tp_order_distance_tolerance_pct` | `0.001` | 新挂单成交后的预期 TP 与已有同向开放 TP 距离小于 0.1% 时跳过该档位；`0` 禁用 |
 | `min_order_amount_quote` | `10` | 最低下单名义金额（quote），低于时跳过；`0` 禁用 |
 | `no_budget_retry_seconds` | `300` | 明确预算错误后的暂停秒数；成交立即恢复，亏损退出激活与退出 TP 豁免 |
 | `buy_position_effectivization_time` | `120` | BUY TP 有效秒数，到期优先撤单并进入 POSITION_HOLD |

@@ -166,8 +166,6 @@ class PMMisterLossExit(_pmm_mister.PMMister):
             if OrderBudgetGuard.should_log(self.config.id, reason, now):
                 self.logger().warning(reason)
             return None
-        if self._is_tp_distance_conflict(price):
-            return None
         if self._is_expected_tp_distance_conflict(level_id, price):
             return None
         executor_config = super().get_executor_config(level_id, price, amount)
