@@ -21,7 +21,17 @@
 - Connector / 交易对：Binance 现货，`ZEC-USDT`
 - 恢复记录：容器内 `data/pmm_mister_loss_exit/runtime/pmm_mister_loss_exit_sample.json`
 - 实例数据宿主机目录：`/root/hummingbot-api/bots/instances/bot_20261126161333-20261126-161343/data`
-- 最近健康检查：`(True, 'healthy')`；容器为 `running`。
+- 2026-11-28 17:11 UTC 容器为 `running`，健康脚本返回 `(True, 'healthy')`；但该脚本只确认策略已启动，不能代表 Controller 当前允许交易。
+
+## 2026-11-28 17:13 UTC 停止挂单异常快照
+
+- 最后一笔新挂单日志停在 15:54:34 UTC；同一秒出现 `Order recovery blocked: duplicate order id`，最后一笔完整成交为 16:05:15 UTC。
+- 运行中的 Controller 因运行时恢复快照存在重复订单引用而进入 BLOCKED；现有开放订单未因此被自动撤销。
+- 当前交易所快照为 143 笔开放订单：4 笔 BUY、139 笔 SELL；142 笔 OPEN、1 笔 PARTIALLY_FILLED。
+- BUY 价格范围为 680.80–717.23，SELL 价格范围为 727.34–1360.09；价格仅为该时刻快照。
+- 磁盘恢复文件有 176 个 Executor、179 个唯一订单引用，没有重复；最后成功保存时间为 15:48:29 UTC。
+- 容器内只读恢复诊断对磁盘记录返回 READY，说明磁盘文件与运行中 Controller 的内存阻断状态不同。不要仅凭该 READY 或容器健康脚本判断已恢复交易。
+- 本次只读检查未修改配置、订单、代码或容器。重复引用如何产生仍需代码级复现；重启或修复需用户另行授权。
 
 ## 最近确认的实盘配置
 
