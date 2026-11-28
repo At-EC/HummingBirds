@@ -354,12 +354,19 @@ class PMMisterLossExit(_pmm_mister.PMMister):
         if not self._recovery_pending and self.recovery_state == "RESTORING":
             self.recovery_state = "READY"
 
+    def _refresh_loss_exit_recovery_requirement(self, payload) -> None:
+        executor_records = payload.get("executors", []) if payload else []
+        unresolved = self._loss_exit_recovery_store.unfinished_records(executor_records)
+        self._loss_exit_recovery_required = bool(unresolved)
+
     async def _prepare_recovery_actions(self) -> None:
         try:
             recovered = await self._recovery_coordinator.load_snapshots()
             if recovered is None:
+                self._refresh_loss_exit_recovery_requirement(None)
                 self.recovery_state = "READY"
                 return
+            self._refresh_loss_exit_recovery_requirement(recovered["payload"])
             actions = []
             for record in recovered["payload"]["executors"]:
                 executor_id = record["executor_id"]
