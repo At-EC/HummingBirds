@@ -616,6 +616,8 @@ class PMMisterLossExit(_pmm_mister.PMMister):
         )
         candidate_count = len(self._get_eligible_loss_exit_candidates(self.market_data_provider.time()))
         info.update({
+            "recovery_state": self.recovery_state,
+            "recovery_blocked": self.recovery_state == "BLOCKED",
             "loss_exit_active_executor": active.id if active else None,
             "loss_exit_active_side": active.config.side.name if active else None,
             "loss_exit_candidate_count": candidate_count,
