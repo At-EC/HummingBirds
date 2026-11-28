@@ -75,6 +75,15 @@ def stop_keep_open_orders(container_name):
             "--keep-open-orders", "--timeout", "60",
         )
     except subprocess.CalledProcessError as error:
+        if error.returncode == 2:
+            docker("kill", "--signal=SIGUSR2", container_name)
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                state = json.loads(docker("inspect", container_name))[0]["State"]
+                if not state.get("Running"):
+                    return
+                time.sleep(0.5)
+            raise error
         if error.returncode != 137:
             raise
         state = json.loads(docker("inspect", container_name))[0]["State"]

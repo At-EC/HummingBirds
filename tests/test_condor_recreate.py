@@ -306,3 +306,22 @@ def test_bootstrap_streams_worker_before_any_stop(monkeypatch):
     assert "stop" not in command
     assert "rm" not in command
     assert "def build_adoption_record" in runner.call_args.kwargs["input"]
+
+
+
+def test_keep_stop_falls_back_to_sigusr2_when_cli_is_unavailable(monkeypatch):
+    from scripts import condor_recreate
+    calls = []
+    states = iter([True, True, False])
+
+    def fake_docker(*args):
+        calls.append(args)
+        if args[0] == "inspect":
+            return json.dumps([{"State": {"Running": next(states)}}])
+        if args[0] == "exec":
+            raise subprocess.CalledProcessError(2, args, stderr="no bot has been started")
+        return ""
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    condor_recreate.stop_keep_open_orders("demo")
+    assert ("kill", "--signal=SIGUSR2", "demo") in calls
