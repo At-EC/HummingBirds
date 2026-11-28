@@ -89,6 +89,7 @@ class PositionExecutor(ExecutorBase):
         self._loss_exit_activated = False
         self._loss_exit_last_error = None
         self._loss_exit_order_reconciliation_required = False
+        self._no_budget_tp_cancel_requested = False
 
     @property
     def is_perpetual(self) -> bool:
@@ -871,6 +872,20 @@ class PositionExecutor(ExecutorBase):
         )
         self.logger().debug("Removing take profit")
 
+    def cancel_take_profit_for_no_budget(self) -> bool:
+        if (self.status != RunnableStatus.RUNNING
+                or self._take_profit_limit_order is None
+                or not self._take_profit_limit_order.is_open):
+            return False
+        order_id = self._take_profit_limit_order.order_id
+        self.cancel_take_profit()
+        self._no_budget_tp_cancel_requested = True
+        self.early_stop(keep_position=True)
+        self.logger().info(
+            f"Cancelled distant TP {order_id} to release budget; no replacement order was placed."
+        )
+        return True
+
     def cancel_open_order(self):
         """
         This method is responsible for canceling the open order.
@@ -1174,6 +1189,7 @@ class PositionExecutor(ExecutorBase):
                 if self._take_profit_limit_order and self._take_profit_limit_order.is_open else None
             ),
             "held_position_orders": self._held_position_orders,
+            "no_budget_tp_cancel_requested": self._no_budget_tp_cancel_requested,
         }
         if self._loss_exit is not None:
             info.update({

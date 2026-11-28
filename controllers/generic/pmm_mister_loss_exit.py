@@ -8,7 +8,7 @@ from typing import List, Optional
 from pydantic import Field, field_validator, model_validator
 
 from controllers.generic import pmm_mister as _pmm_mister
-from hummingbot.core.data_type.common import TradeType
+from hummingbot.core.data_type.common import PriceType, TradeType
 from hummingbot.strategy_v2.controllers.executor_recovery import ExecutorRecoveryStore
 from hummingbot.strategy_v2.controllers.loss_exit_recovery import LossExitRecoveryStore
 from hummingbot.strategy_v2.controllers.order_budget import OrderBudgetGuard
@@ -19,6 +19,7 @@ from hummingbot.strategy_v2.executors.position_executor.loss_exit import LossExi
 from hummingbot.strategy_v2.executors.position_executor.recovery import ExecutorRuntimeRestorer
 from hummingbot.strategy_v2.models.executor_actions import (
     ActivateLossExitAction,
+    CancelTakeProfitAction,
     CreateExecutorAction,
     ExecutorAction,
     StopExecutorAction,
@@ -48,6 +49,9 @@ class PMMisterLossExitConfig(_pmm_mister.PMMisterConfig):
     )
     no_budget_retry_seconds: int = Field(
         default=300, ge=1, json_schema_extra={"is_updatable": True}
+    )
+    no_budget_tp_cancel_distance_pct: Decimal = Field(
+        default=Decimal("0"), ge=0, json_schema_extra={"is_updatable": True}
     )
 
     @field_validator("loss_exit_trigger_pct", mode="before")
@@ -91,6 +95,7 @@ class PMMisterLossExit(_pmm_mister.PMMister):
         self._recovery_actions = []
         self._recovery_task = None
         self._recovery_last_snapshots = None
+        self._no_budget_last_cancel_pause_at = None
         store = ExecutorRecoveryStore(
             config.id, Path("data/pmm_mister_loss_exit/runtime")
         )
@@ -403,6 +408,57 @@ class PMMisterLossExit(_pmm_mister.PMMister):
             return
         self._recovery_last_snapshots = comparable
 
+    def get_no_budget_tp_cancel_action(self) -> Optional[CancelTakeProfitAction]:
+        tolerance = self.config.no_budget_tp_cancel_distance_pct
+        now = self.market_data_provider.time()
+        budget = OrderBudgetGuard.snapshot(self.config.id, now)
+        if tolerance <= 0 or not budget["no_budget_paused"]:
+            return None
+        pause_at = budget.get("no_budget_paused_at")
+        if pause_at == getattr(self, "_no_budget_last_cancel_pause_at", None):
+            return None
+        current_price = self.market_data_provider.get_price_by_type(
+            self.config.connector_name, self.config.trading_pair, PriceType.MidPrice
+        )
+        if current_price is None or not current_price.is_finite() or current_price <= 0:
+            return None
+        candidates = []
+        for executor in self.executors_info:
+            info = executor.custom_info
+            if not executor.is_active or not executor.is_trading:
+                continue
+            if (info.get("no_budget_tp_cancel_requested", False)
+                    or info.get("loss_exit_lock_held", False)):
+                continue
+            if not info.get("take_profit_order_open", False):
+                continue
+            try:
+                tp_price = Decimal(str(info.get("take_profit_order_price")))
+            except (InvalidOperation, TypeError, ValueError):
+                continue
+            if not tp_price.is_finite() or tp_price <= 0:
+                continue
+            if executor.config.side == TradeType.SELL:
+                distance = (current_price - tp_price) / current_price
+            elif executor.config.side == TradeType.BUY:
+                distance = (tp_price - current_price) / current_price
+            else:
+                continue
+            if distance > tolerance:
+                candidates.append((distance, executor))
+        if not candidates:
+            return None
+        _, selected = max(candidates, key=lambda item: (item[0], item[1].id))
+        self._no_budget_last_cancel_pause_at = pause_at
+        self.logger().info(
+            f"Cancel distant TP for no budget: executor={selected.id} "
+            f"distance={max(candidates, key=lambda item: item[0])[0]}"
+        )
+        return CancelTakeProfitAction(
+            controller_id=self.config.id,
+            executor_id=selected.id,
+        )
+
     def determine_executor_actions(self) -> List[ExecutorAction]:
         if self.recovery_state not in ("READY", "DISABLED"):
             return self._recovery_actions_step()
@@ -416,6 +472,11 @@ class PMMisterLossExit(_pmm_mister.PMMister):
                 self._loss_exit_recovery_logged = True
             return [action for action in actions if isinstance(action, StopExecutorAction)]
         if self._loss_exit_runtime_owns_record:
+            self._sync_loss_exit_recovery(actions)
+            return actions
+        cancel_action = self.get_no_budget_tp_cancel_action()
+        if cancel_action is not None:
+            actions.append(cancel_action)
             self._sync_loss_exit_recovery(actions)
             return actions
         activation = self.get_loss_exit_activation_action()

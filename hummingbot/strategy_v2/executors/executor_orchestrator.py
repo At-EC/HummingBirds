@@ -25,6 +25,7 @@ from hummingbot.strategy_v2.executors.xemm_executor.xemm_executor import XEMMExe
 from hummingbot.strategy_v2.models.base import RunnableStatus
 from hummingbot.strategy_v2.models.executor_actions import (
     ActivateLossExitAction,
+    CancelTakeProfitAction,
     CreateExecutorAction,
     ExecutorAction,
     StopExecutorAction,
@@ -542,7 +543,9 @@ class ExecutorOrchestrator:
             self.positions_held[controller_id] = []
             self.cached_performance[controller_id] = PerformanceReport()
 
-        if isinstance(action, ActivateLossExitAction):
+        if isinstance(action, CancelTakeProfitAction):
+            self.cancel_take_profit_for_no_budget(action)
+        elif isinstance(action, ActivateLossExitAction):
             self.activate_loss_exit(action)
         elif isinstance(action, CreateExecutorAction):
             self.create_executor(action)
@@ -550,6 +553,24 @@ class ExecutorOrchestrator:
             self.stop_executor(action)
         elif isinstance(action, StoreExecutorAction):
             self.store_executor(action)
+
+    def cancel_take_profit_for_no_budget(self, action: CancelTakeProfitAction):
+        executor = next(
+            (item for item in self.active_executors.get(action.controller_id, [])
+             if item.config.id == action.executor_id),
+            None,
+        )
+        if executor is None:
+            self.logger().error(
+                f"Cannot cancel TP for no budget: executor {action.executor_id} not found."
+            )
+            return
+        if not isinstance(executor, PositionExecutor):
+            self.logger().error(
+                f"Cannot cancel TP for no budget on {type(executor).__name__}."
+            )
+            return
+        executor.cancel_take_profit_for_no_budget()
 
     def activate_loss_exit(self, action: ActivateLossExitAction):
         controller_id = action.controller_id

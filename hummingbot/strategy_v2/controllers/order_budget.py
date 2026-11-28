@@ -67,6 +67,7 @@ class OrderBudgetGuard:
         return {
             "no_budget_paused": cls.is_paused(controller_id, now),
             "no_budget_resume_at": state.get("resume_at"),
+            "no_budget_paused_at": state.get("paused_at"),
             "no_budget_last_error": state.get("last_error"),
             "min_order_last_skip_reason": state.get("last_skip_reason"),
         }

@@ -211,6 +211,7 @@ python3 scripts/condor_recreate.py --container BOT_NAME --yes --live
 | `tp_order_distance_tolerance_pct` | `0.001` | 新挂单成交后的预期 TP 与已有同向开放 TP 距离小于 0.1% 时跳过该档位；`0` 禁用 |
 | `min_order_amount_quote` | `10` | 最低下单名义金额（quote），低于时跳过；`0` 禁用 |
 | `no_budget_retry_seconds` | `300` | 明确预算错误后的暂停秒数；成交立即恢复，亏损退出激活与退出 TP 豁免 |
+| `no_budget_tp_cancel_distance_pct` | `0` | 预算不足时只撤销超过该距离的最远 TP，转入 POSITION_HOLD 且不重挂；`0` 禁用 |
 | `buy_position_effectivization_time` | `120` | BUY TP 有效秒数，到期优先撤单并进入 POSITION_HOLD |
 | `sell_position_effectivization_time` | `120` | SELL TP 有效秒数，到期优先撤单并进入 POSITION_HOLD |
 
