@@ -413,3 +413,13 @@ python3 scripts/condor_recovery_check.py --container BOT_NAME
 - 外部撤单进入 POSITION_HOLD 收尾，不自动创建新 TP。
 - 不兼容的旧镜像不能用于保留订单回滚；回滚目标也必须包含恢复组件。
 - Paper Trade 的进程内模拟订单不能完全代表交易所真实订单，实盘前仍需 Binance 只读适配器验证和明确批准。
+
+
+## 12. 项目技能与持续记忆
+
+项目级技能位于 `.agents/skills/condor-pmm-mister-ops/`。后续进行策略修改、Condor 部署、订单恢复、只读检查或故障排查时，先阅读该技能引用的当前状态与操作日志。
+
+- `references/current-state.md`：记录最近验证的环境、配置、部署状态和已知限制。
+- `references/operations-log.md`：追加记录每次用户目标、实际改动、新发现、验证、提交部署和遗留问题。
+
+每次任务完成后同步更新记忆并提交。历史状态必须带验证时间，秘密值不得写入记忆或仓库；历史快照不能替代当前实测。
