@@ -381,7 +381,7 @@ class PositionExecutor(ExecutorBase):
     def loss_exit_lock_held(self) -> bool:
         return (self._loss_exit_activated and not self.is_closed
                 and self._loss_exit.state in (
-                    LossExitState.ACTIVATING, LossExitState.ACTIVE, LossExitState.COMPLETED
+                    LossExitState.ACTIVATING, LossExitState.ACTIVE
                 ))
 
     def _update_loss_exit_state(self):

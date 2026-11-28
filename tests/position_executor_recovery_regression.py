@@ -111,6 +111,24 @@ class PositionExecutorRecoveryTests(unittest.TestCase):
         self.assertEqual(executor.close_type, CloseType.TAKE_PROFIT)
         self.assertEqual(executor.status, RunnableStatus.SHUTTING_DOWN)
 
+    def test_completed_exit_does_not_reacquire_lock_on_restore(self):
+        executor = make_executor(amount=Decimal("2"))
+        executor._loss_exit = LossExitTracker(LossExitConfig(
+            trigger_pct=Decimal("0.005"), offset_pct=Decimal("0.001"),
+            cooldown_seconds=60, activation_delay_seconds=60,
+        ))
+        record = recovery_record_with_tp(loss_exit=True)
+        record["loss_exit"]["state"] = "COMPLETED"
+        record["loss_exit"]["lock_held"] = False
+
+        ExecutorRuntimeRestorer.restore(
+            executor, record, snapshots(recovered_tp(filled="2", status="FILLED"))
+        )
+
+        self.assertEqual(executor._loss_exit.state, LossExitState.COMPLETED)
+        self.assertFalse(executor.loss_exit_lock_held)
+        self.assertFalse(executor.snapshot_recovery_state()["loss_exit"]["lock_held"])
+
     def test_completed_tp_snapshot_has_single_owner(self):
         from types import SimpleNamespace
         from hummingbot.strategy_v2.controllers.order_budget import OrderBudgetGuard
