@@ -65,6 +65,7 @@ class ExecutorRuntimeRestorer:
         loss_exit = executor._loss_exit
         return {
             "executor_id": config.id,
+            "recovery_adopted": executor._recovery_adopted,
             "executor_config": json.loads(config.model_dump_json()),
             "open_order": cls._snapshot_order(
                 executor._open_order,
@@ -139,6 +140,7 @@ class ExecutorRuntimeRestorer:
                 snapshots: dict[str, RecoveredOrderSnapshot]) -> None:
         if record.get("executor_id") != executor.config.id:
             raise RecoveryBlocked("Executor ID mismatch")
+        executor._recovery_adopted = bool(record.get("recovery_adopted", False))
         open_record = record.get("open_order")
         if open_record is None:
             if record.get("take_profit_order") is not None or record.get("loss_exit_orders"):

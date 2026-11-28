@@ -253,6 +253,10 @@ class PMMister(ControllerBase):
     - Separate buy/sell cooldown and effectivization times
     """
 
+    @staticmethod
+    def _skip_refresh_and_effectivization(executor) -> bool:
+        return bool(executor.custom_info.get("recovery_adopted", False))
+
     def __init__(self, config: PMMisterConfig, *args, **kwargs):
         super().__init__(config, *args, **kwargs)
         self.config = config
@@ -725,6 +729,8 @@ class PMMister(ControllerBase):
         }
 
         for e in self.executors_info:
+            if self._skip_refresh_and_effectivization(e):
+                continue
             if not e.is_active or e.is_trading:
                 continue
 
@@ -779,6 +785,8 @@ class PMMister(ControllerBase):
         }
 
         for e in self.executors_info:
+            if self._skip_refresh_and_effectivization(e):
+                continue
             if not (e.is_active and e.is_trading):
                 continue
 

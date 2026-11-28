@@ -90,6 +90,7 @@ class PositionExecutor(ExecutorBase):
         self._loss_exit_last_error = None
         self._loss_exit_order_reconciliation_required = False
         self._no_budget_tp_cancel_requested = False
+        self._recovery_adopted = False
 
     @property
     def is_perpetual(self) -> bool:
@@ -1190,6 +1191,7 @@ class PositionExecutor(ExecutorBase):
             ),
             "held_position_orders": self._held_position_orders,
             "no_budget_tp_cancel_requested": self._no_budget_tp_cancel_requested,
+            "recovery_adopted": self._recovery_adopted,
         }
         if self._loss_exit is not None:
             info.update({

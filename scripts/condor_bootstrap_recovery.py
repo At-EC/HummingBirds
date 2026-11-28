@@ -49,6 +49,7 @@ def build_adoption_record(snapshot, connector_name: str, trading_pair: str) -> d
     )
     return {
         "executor_id": executor_id,
+        "recovery_adopted": True,
         "executor_config": json.loads(config.model_dump_json()),
         "open_order": {
             "client_order_id": snapshot.client_order_id,
