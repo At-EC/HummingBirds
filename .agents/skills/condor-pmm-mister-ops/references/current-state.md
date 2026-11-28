@@ -6,7 +6,7 @@
 
 - 远程仓库：`https://github.com/At-EC/HummingBirds.git`
 - 当前功能分支：`feat/keep-open-orders-recovery`
-- 最新已验证提交：`9a33867 fix: mark previously adopted recovery orders`
+- 最近验证的策略修复提交：`8d73efb fix: deduplicate completed TP recovery snapshots`
 - Draft PR：`https://github.com/At-EC/HummingBirds/pull/1`
 - 本地开发目录：`recovery-worktree`
 - 服务器开发目录：`/root/recovery-live`
@@ -15,26 +15,24 @@
 
 - SSH 主机：`root@103.193.150.25`；使用本地既有密钥和 `known_hosts`，秘密不进入仓库。
 - Bot 容器：`bot_20261126161333-20261126-161343`
-- 运行镜像：`hummingbot/pmm-mister-loss-exit:v2.17.0-recovery`
+- 运行镜像：`hummingbot/pmm-mister-loss-exit:v2.17.0-recovery-tp-dedup`
 - Controller：`pmm_mister_loss_exit`
 - Controller 配置 ID：`pmm_mister_loss_exit_sample`
 - Connector / 交易对：Binance 现货，`ZEC-USDT`
 - 恢复记录：容器内 `data/pmm_mister_loss_exit/runtime/pmm_mister_loss_exit_sample.json`
 - 实例数据宿主机目录：`/root/hummingbot-api/bots/instances/bot_20261126161333-20261126-161343/data`
-- 2026-11-28 17:11 UTC 容器为 `running`，健康脚本返回 `(True, 'healthy')`；但该脚本只确认策略已启动，不能代表 Controller 当前允许交易。
+- 2026-11-28 17:41 UTC 容器为 `running`，健康检查为 healthy；17:39–17:41 UTC 持续出现新 BUY 成交和新 SELL TP。健康脚本本身仍不能单独识别内存 BLOCKED，必须同时检查日志和新订单活动。
 
-## 2026-11-28 17:13 UTC 停止挂单异常快照
+## 2026-11-28 停止挂单异常与修复
 
-- 最后一笔新挂单日志停在 15:54:34 UTC；同一秒出现 `Order recovery blocked: duplicate order id`，最后一笔完整成交为 16:05:15 UTC。
-- 运行中的 Controller 因运行时恢复快照存在重复订单引用而进入 BLOCKED；现有开放订单未因此被自动撤销。
-- 当前交易所快照为 143 笔开放订单：4 笔 BUY、139 笔 SELL；142 笔 OPEN、1 笔 PARTIALLY_FILLED。
-- BUY 价格范围为 680.80–717.23，SELL 价格范围为 727.34–1360.09；价格仅为该时刻快照。
-- 磁盘恢复文件有 176 个 Executor、179 个唯一订单引用，没有重复；最后成功保存时间为 15:48:29 UTC。
-- 容器内只读恢复诊断对磁盘记录返回 READY，说明磁盘文件与运行中 Controller 的内存阻断状态不同。不要仅凭该 READY 或容器健康脚本判断已恢复交易。
+- 异常期间最后一笔新挂单停在 15:54:34 UTC；同一秒出现 `Order recovery blocked: duplicate order id`，最后一笔完整成交为 16:05:15 UTC。
 - 根因已确认：TP 完成事件将同一 TrackedOrder 同时留在 `_take_profit_limit_order` 和 `_close_order`，后续快照把同一订单写入 `take_profit_order` 与 `close_order`，触发 RecoveryStore 的重复订单保护。
-- 代码修复位于 `position_executor/recovery.py`：当 TP 与 close 指向同一订单时，快照只保留 `take_profit_order`，将重复的 `close_order` 省略；现有恢复逻辑可根据 FILLED TP 正确重建收尾状态。
-- 新增完成事件回归先失败后通过；去重后的隔离完整回归 68 项通过。测试输出中的 disk full 和无效端口是故障场景测试的预期日志。
-- 此修复尚未部署到实盘，当前 Bot 的内存 BLOCKED 状态不会因代码提交而自动解除。部署与重启仍需单独执行保留订单检查。
+- 修复位于 `position_executor/recovery.py`：当 TP 与 close 指向同一订单时，快照只保留 `take_profit_order`，省略重复的 `close_order`；现有恢复逻辑可根据 FILLED TP 重建收尾状态。
+- 新增完成事件回归先失败后通过；新镜像内去重后的完整回归 68 项通过。测试输出中的 disk full 和无效端口是故障场景测试的预期日志。
+- 17:38:41 UTC 已切换到 `v2.17.0-recovery-tp-dedup`。重建前 167 条接管记录全部有保护标记。
+- 142 笔部署前基线订单中 141 笔保留；减少的 1 笔为普通 BUY，在启动后被正常刷新撤销。部署后快照新增 4 笔开放订单。
+- 部署后恢复文件有 179 个 Executor、184 个唯一订单引用且无重复；观察期内未再出现 `Order recovery blocked`、`Executor recovery blocked` 或 duplicate order。
+- 配置与 docker inspect 备份位于 `/root/condor-backups/recreated-bots/`，文件名带 `before-tp-dedup`。
 
 ## 最近确认的实盘配置
 
