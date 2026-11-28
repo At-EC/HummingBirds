@@ -159,3 +159,17 @@ class PositionExecutorRecoveryTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class PositionOnlyRecoveryTests(unittest.TestCase):
+    def test_executor_without_any_order_does_not_require_open_snapshot(self):
+        executor = make_executor(amount=Decimal("2"))
+        record = recovery_record_with_tp()
+        record["open_order"] = None
+        record["take_profit_order"] = None
+        record["loss_exit_orders"] = []
+
+        ExecutorRuntimeRestorer.restore(executor, record, {})
+
+        self.assertIsNone(executor._open_order)
+        self.assertIsNone(executor._take_profit_limit_order)

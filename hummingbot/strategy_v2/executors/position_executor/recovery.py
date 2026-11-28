@@ -140,14 +140,18 @@ class ExecutorRuntimeRestorer:
         if record.get("executor_id") != executor.config.id:
             raise RecoveryBlocked("Executor ID mismatch")
         open_record = record.get("open_order")
-        if open_record is None or open_record["client_order_id"] not in snapshots:
-            raise RecoveryBlocked("Open order snapshot is missing")
-        executor._open_order = cls._restore_order(
-            open_record,
-            snapshots[open_record["client_order_id"]],
-            executor.config.trading_pair,
-            PositionAction.OPEN,
-        )
+        if open_record is None:
+            if record.get("take_profit_order") is not None or record.get("loss_exit_orders"):
+                raise RecoveryBlocked("Open order snapshot is missing")
+        else:
+            if open_record["client_order_id"] not in snapshots:
+                raise RecoveryBlocked("Open order snapshot is missing")
+            executor._open_order = cls._restore_order(
+                open_record,
+                snapshots[open_record["client_order_id"]],
+                executor.config.trading_pair,
+                PositionAction.OPEN,
+            )
         tp_record = record.get("take_profit_order")
         if tp_record is not None:
             order_id = tp_record["client_order_id"]
