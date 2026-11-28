@@ -149,6 +149,8 @@ def health_check(inspect):
         stdout = docker("logs", "--since", state["StartedAt"], name)
         if "Input is not a terminal" in stdout or "Failed to start strategy" in stdout:
             return False, "strategy startup failed"
+        if "Order recovery blocked" in stdout or "Executor recovery blocked" in stdout:
+            return False, "order recovery blocked"
         if "strategy execution started" in stdout:
             return True, "healthy"
     except (subprocess.CalledProcessError, KeyError):
@@ -173,6 +175,8 @@ def health_check(inspect):
         text = "\n".join(lines[startup_lines[-1]:])
         if "Input is not a terminal" in text or "Failed to start strategy" in text:
             return False, "strategy startup failed"
+        if "Order recovery blocked" in text or "Executor recovery blocked" in text:
+            return False, "order recovery blocked"
         return True, "healthy"
     return False, "log mount not found"
 

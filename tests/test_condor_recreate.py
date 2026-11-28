@@ -288,6 +288,66 @@ def test_health_check_accepts_current_container_stdout(monkeypatch):
     assert calls[1][0] == "logs"
 
 
+def test_health_check_rejects_recovery_blocked_in_container_stdout(monkeypatch):
+    from scripts import condor_recreate
+    inspect = make_inspect()
+
+    def fake_docker(*args):
+        if args[0] == "inspect":
+            return json.dumps([{
+                "State": {"Running": True, "ExitCode": 0, "StartedAt": "2026-11-28T09:00:00Z"},
+            }])
+        if args[0] == "logs":
+            return "strategy execution started\nExecutor recovery blocked for executor-1: duplicate order id"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    healthy, detail = condor_recreate.health_check(inspect)
+    assert not healthy
+    assert detail == "order recovery blocked"
+
+
+def test_health_check_rejects_recovery_blocked_after_latest_file_startup(monkeypatch, tmp_path):
+    (tmp_path / "logs_bot_demo.log").write_text(
+        "strategy execution started\n"
+        "Order recovery blocked: duplicate order id: tp-1\n"
+    )
+    inspect = make_inspect()
+    inspect["Mounts"] = [{
+        "Source": str(tmp_path), "Destination": "/home/hummingbot/logs", "Mode": "rw",
+    }]
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": True, "ExitCode": 0}}])
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    healthy, detail = health_check(inspect)
+    assert not healthy
+    assert detail == "order recovery blocked"
+
+
+def test_health_check_ignores_recovery_block_before_latest_file_startup(monkeypatch, tmp_path):
+    (tmp_path / "logs_bot_demo.log").write_text(
+        "strategy execution started\n"
+        "Order recovery blocked: old incident\n"
+        "strategy execution started\n"
+        "order filled\n"
+    )
+    inspect = make_inspect()
+    inspect["Mounts"] = [{
+        "Source": str(tmp_path), "Destination": "/home/hummingbot/logs", "Mode": "rw",
+    }]
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": True, "ExitCode": 0}}])
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    healthy, detail = health_check(inspect)
+    assert healthy, detail
+
+
 
 def test_bootstrap_streams_worker_before_any_stop(monkeypatch):
     from unittest.mock import MagicMock

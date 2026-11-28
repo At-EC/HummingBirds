@@ -21,7 +21,8 @@
 - Connector / 交易对：Binance 现货，`ZEC-USDT`
 - 恢复记录：容器内 `data/pmm_mister_loss_exit/runtime/pmm_mister_loss_exit_sample.json`
 - 实例数据宿主机目录：`/root/hummingbot-api/bots/instances/bot_20261126161333-20261126-161343/data`
-- 2026-11-28 17:41 UTC 容器为 `running`，健康检查为 healthy；17:39–17:41 UTC 持续出现新 BUY 成交和新 SELL TP。健康脚本本身仍不能单独识别内存 BLOCKED，必须同时检查日志和新订单活动。
+- 2026-11-28 17:41 UTC 容器为 `running`，健康检查为 healthy；17:39–17:41 UTC 持续出现新 BUY 成交和新 SELL TP。
+- `scripts/condor_recreate.py` 的健康检查已补充恢复阻断检测：当前容器标准输出或最新启动后的日志文件出现 `Order recovery blocked` / `Executor recovery blocked` 时返回 `(False, 'order recovery blocked')`；旧启动周期之前的历史错误不会误报。服务器副本已更新，当前实盘只读结果为 healthy；此改动不需要重启 Bot。
 
 ## 2026-11-28 停止挂单异常与修复
 
