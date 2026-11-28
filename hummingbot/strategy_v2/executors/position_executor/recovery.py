@@ -63,6 +63,17 @@ class ExecutorRuntimeRestorer:
     def snapshot(cls, executor) -> dict:
         config = executor.config
         loss_exit = executor._loss_exit
+        take_profit_order = cls._snapshot_order(
+            executor._take_profit_limit_order,
+            fallback_amount=config.amount,
+            fallback_price=config.entry_price,
+            fallback_side=executor.close_order_side.name,
+            fallback_type=config.triple_barrier_config.take_profit_order_type.name,
+        )
+        close_order = executor._close_order
+        if (take_profit_order is not None and close_order is not None
+                and take_profit_order["client_order_id"] == close_order.order_id):
+            close_order = None
         return {
             "executor_id": config.id,
             "recovery_adopted": executor._recovery_adopted,
@@ -74,14 +85,8 @@ class ExecutorRuntimeRestorer:
                 fallback_side=config.side.name,
                 fallback_type=config.triple_barrier_config.open_order_type.name,
             ),
-            "take_profit_order": cls._snapshot_order(
-                executor._take_profit_limit_order,
-                fallback_amount=config.amount,
-                fallback_price=config.entry_price,
-                fallback_side=executor.close_order_side.name,
-                fallback_type=config.triple_barrier_config.take_profit_order_type.name,
-            ),
-            "close_order": cls._snapshot_order(executor._close_order),
+            "take_profit_order": take_profit_order,
+            "close_order": cls._snapshot_order(close_order),
             "loss_exit_orders": [
                 cls._snapshot_order(tracked)
                 for tracked in executor._loss_exit_orders.values()

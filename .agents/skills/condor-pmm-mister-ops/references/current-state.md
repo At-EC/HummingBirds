@@ -31,7 +31,10 @@
 - BUY 价格范围为 680.80–717.23，SELL 价格范围为 727.34–1360.09；价格仅为该时刻快照。
 - 磁盘恢复文件有 176 个 Executor、179 个唯一订单引用，没有重复；最后成功保存时间为 15:48:29 UTC。
 - 容器内只读恢复诊断对磁盘记录返回 READY，说明磁盘文件与运行中 Controller 的内存阻断状态不同。不要仅凭该 READY 或容器健康脚本判断已恢复交易。
-- 本次只读检查未修改配置、订单、代码或容器。重复引用如何产生仍需代码级复现；重启或修复需用户另行授权。
+- 根因已确认：TP 完成事件将同一 TrackedOrder 同时留在 `_take_profit_limit_order` 和 `_close_order`，后续快照把同一订单写入 `take_profit_order` 与 `close_order`，触发 RecoveryStore 的重复订单保护。
+- 代码修复位于 `position_executor/recovery.py`：当 TP 与 close 指向同一订单时，快照只保留 `take_profit_order`，将重复的 `close_order` 省略；现有恢复逻辑可根据 FILLED TP 正确重建收尾状态。
+- 新增完成事件回归先失败后通过；去重后的隔离完整回归 68 项通过。测试输出中的 disk full 和无效端口是故障场景测试的预期日志。
+- 此修复尚未部署到实盘，当前 Bot 的内存 BLOCKED 状态不会因代码提交而自动解除。部署与重启仍需单独执行保留订单检查。
 
 ## 最近确认的实盘配置
 

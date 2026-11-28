@@ -111,6 +111,25 @@ class PositionExecutorRecoveryTests(unittest.TestCase):
         self.assertEqual(executor.close_type, CloseType.TAKE_PROFIT)
         self.assertEqual(executor.status, RunnableStatus.SHUTTING_DOWN)
 
+    def test_completed_tp_snapshot_has_single_owner(self):
+        from types import SimpleNamespace
+        from hummingbot.strategy_v2.controllers.order_budget import OrderBudgetGuard
+
+        OrderBudgetGuard.reset()
+        executor = make_executor(amount=Decimal("2"))
+        executor.place_take_profit_limit_order(amount=Decimal("1"), price=Decimal("100"))
+        executor.process_order_completed_event(None, None, SimpleNamespace(
+            order_id="tp-order",
+            base_asset_amount=Decimal("1"),
+            timestamp=101.0,
+            exchange_order_id="exchange-tp-order",
+        ))
+
+        record = executor.snapshot_recovery_state()
+
+        self.assertEqual(record["take_profit_order"]["client_order_id"], "tp-order")
+        self.assertIsNone(record["close_order"])
+
     def test_unknown_tp_blocks_recovery(self):
         executor = make_executor(amount=Decimal("2"))
         executor._loss_exit = LossExitTracker(LossExitConfig(
