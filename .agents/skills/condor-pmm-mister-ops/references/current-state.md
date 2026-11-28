@@ -6,7 +6,9 @@
 
 - 远程仓库：`https://github.com/At-EC/HummingBirds.git`
 - 当前功能分支：`feat/keep-open-orders-recovery`
-- 最近验证的策略修复提交：`8d73efb fix: deduplicate completed TP recovery snapshots`
+- 最近验证的策略修复提交：`26d24da fix: release completed loss exit locks`
+- Condor 状态发布提交：`12d05cd feat: publish recovery state to Condor`
+- Condor API 服务器本地提交：`2ee1a45 fix: surface blocked order recovery in bot status`（未宣称已推送其上游仓库）
 - Draft PR：`https://github.com/At-EC/HummingBirds/pull/1`
 - 本地开发目录：`recovery-worktree`
 - 服务器开发目录：`/root/recovery-live`
@@ -15,25 +17,26 @@
 
 - SSH 主机：`root@103.193.150.25`；使用本地既有密钥和 `known_hosts`，秘密不进入仓库。
 - Bot 容器：`bot_20261126161333-20261126-161343`
-- 运行镜像：`hummingbot/pmm-mister-loss-exit:v2.17.0-recovery-tp-dedup`
+- 运行镜像：`hummingbot/pmm-mister-loss-exit:v2.17.0-recovery-telemetry-lock-fix`
 - Controller：`pmm_mister_loss_exit`
 - Controller 配置 ID：`pmm_mister_loss_exit_sample`
 - Connector / 交易对：Binance 现货，`ZEC-USDT`
 - 恢复记录：容器内 `data/pmm_mister_loss_exit/runtime/pmm_mister_loss_exit_sample.json`
 - 实例数据宿主机目录：`/root/hummingbot-api/bots/instances/bot_20261126161333-20261126-161343/data`
-- 2026-11-28 17:41 UTC 容器为 `running`，健康检查为 healthy；17:39–17:41 UTC 持续出现新 BUY 成交和新 SELL TP。
-- `scripts/condor_recreate.py` 的健康检查已补充恢复阻断检测：当前容器标准输出或最新启动后的日志文件出现 `Order recovery blocked` / `Executor recovery blocked` 时返回 `(False, 'order recovery blocked')`；旧启动周期之前的历史错误不会误报。服务器副本已更新，当前实盘只读结果为 healthy；此改动不需要重启 Bot。
+- 2026-11-28 18:28 UTC 容器 running、健康检查 healthy，Condor API 返回 `status=running`、`recovery_blocked=false`，Controller 为 `READY`；新订单已恢复。
+- `scripts/condor_recreate.py` 的健康检查会识别当前启动周期内的 Order/Executor recovery blocked，并忽略旧启动周期的历史错误。
 
-## 2026-11-28 停止挂单异常与修复
+## 2026-11-28 恢复与 Condor 状态修复
 
-- 异常期间最后一笔新挂单停在 15:54:34 UTC；同一秒出现 `Order recovery blocked: duplicate order id`，最后一笔完整成交为 16:05:15 UTC。
-- 根因已确认：TP 完成事件将同一 TrackedOrder 同时留在 `_take_profit_limit_order` 和 `_close_order`，后续快照把同一订单写入 `take_profit_order` 与 `close_order`，触发 RecoveryStore 的重复订单保护。
-- 修复位于 `position_executor/recovery.py`：当 TP 与 close 指向同一订单时，快照只保留 `take_profit_order`，省略重复的 `close_order`；现有恢复逻辑可根据 FILLED TP 重建收尾状态。
-- 新增完成事件回归先失败后通过；新镜像内去重后的完整回归 68 项通过。测试输出中的 disk full 和无效端口是故障场景测试的预期日志。
-- 17:38:41 UTC 已切换到 `v2.17.0-recovery-tp-dedup`。重建前 167 条接管记录全部有保护标记。
-- 142 笔部署前基线订单中 141 笔保留；减少的 1 笔为普通 BUY，在启动后被正常刷新撤销。部署后快照新增 4 笔开放订单。
-- 部署后恢复文件有 179 个 Executor、184 个唯一订单引用且无重复；观察期内未再出现 `Order recovery blocked`、`Executor recovery blocked` 或 duplicate order。
-- 配置与 docker inspect 备份位于 `/root/condor-backups/recreated-bots/`，文件名带 `before-tp-dedup`。
+- TP 完成时的重复快照已通过 `8d73efb` 修复：TP 与 close 为同一订单时只序列化一次。
+- 遥测部署后稳定复现 `multiple loss exit locks found`。实测磁盘有 5 条 COMPLETED、0 条锁；恢复过程把这些历史已完成记录重新变成锁。
+- `26d24da` 将调度锁限制为 ACTIVATING / ACTIVE；COMPLETED 不再重新持锁。新增恢复回归先失败后通过，完整 pytest 回归 45 项通过。
+- `pmm_mister_loss_exit.get_custom_info()` 发布 `recovery_state` 和 `recovery_blocked`；Condor API 在任一 Controller 阻断时返回 `status=error`，正常 READY 时保持 running。现有前端对 error 显示红色，无需修改前端。
+- 已在实际 Condor API 验证阻断时返回 error / true，修复后返回 running / false。没有可控制的已打开浏览器标签，因此未声称做过视觉截图验证。
+- 最终部署前 152 笔订单中 150 笔保留，2 笔普通订单由策略刷新撤销，部署后快照新增 4 笔。175 条接管记录在最终重建前全部有保护标记。
+- Condor API 相关测试（含状态推送、停止与归档）在 asyncio auto 模式下 76 项通过。
+- 配置和容器备份位于 `/root/condor-backups/recreated-bots/`，最终文件名带 `before-lock-fix`。
+- 仍会出现旧亏损退出文件的 `Unfinished loss exit record found after restart` 警告；当前未因此 BLOCKED，但该历史文件清理逻辑需要另行审查。
 
 ## 最近确认的实盘配置
 

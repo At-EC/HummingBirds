@@ -109,3 +109,12 @@
 - 验证：两个新增测试在旧代码均返回 healthy 而失败，旧历史错误测试通过；修复后重建脚本 22 项测试通过，完整 pytest 回归 45 项通过（6 个上游 Pydantic 弃用警告）。服务器实盘只读检查为 healthy。
 - 提交与部署：脚本和测试提交到功能分支；服务器检查脚本已更新，无镜像或 Bot 改动，无重启。
 - 遗留问题：该检查依赖恢复错误日志；若要获得实时结构化状态，可另行增加显式 READY/BLOCKED 状态输出。
+
+## 2026-11-28：Condor 页面接入恢复阻断并完成多锁修复
+
+- 用户目标：让 Condor 页面显示 Controller 内存 BLOCKED，而不是仍显示 running。
+- 实际改动：Bot 的 custom_info 新增 recovery_state / recovery_blocked；Condor API 在任一 Controller 阻断时将 Bot 总状态改为 error，并返回 recovery_blocked 与错误说明。更新服务器 API 文件并重启 API，Bot 使用新遥测镜像保留订单重建。
+- 新发现：前端已对 error 显示红色，无需改前端。遥测部署后发现可稳定复现的 multiple loss exit locks：磁盘有 5 条 COMPLETED、0 条锁，但恢复后 COMPLETED 被重新视为持锁。重启只能临时清除内存状态，不能解决根因。
+- 验证：Bot 状态发布和 API 映射测试均先失败后通过；Condor 相关回归在 asyncio auto 模式下 76 项通过。多锁修复回归先失败后通过，完整策略 pytest 45 项通过。实际 API 在阻断时显示 error / true，最终显示 running / false / READY；健康检查 healthy，新订单恢复。最终订单基线 152 笔，150 笔保留、2 笔普通订单刷新撤销、4 笔新增。
+- 提交与部署：HummingBirds `12d05cd`（状态发布）和 `26d24da`（多锁修复）；Condor API 本地提交 `2ee1a45`。实盘镜像 `v2.17.0-recovery-telemetry-lock-fix`，API 已重启。
+- 遗留问题：没有可控制的已打开浏览器标签，未做视觉截图验证；旧亏损退出文件仍会触发 Unfinished loss exit record 警告，需另行审查清理逻辑。Condor API 提交未宣称推送到其上游仓库。
