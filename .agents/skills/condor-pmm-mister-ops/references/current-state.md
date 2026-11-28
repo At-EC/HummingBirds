@@ -24,7 +24,9 @@
 - Connector / 交易对：Binance 现货，`ZEC-USDT`
 - 恢复记录：容器内 `data/pmm_mister_loss_exit/runtime/pmm_mister_loss_exit_sample.json`
 - 实例数据宿主机目录：`/root/hummingbot-api/bots/instances/bot_20261126161333-20261126-161343/data`
-- 2026-11-28 18:51 UTC 容器 running、健康检查 healthy，Condor API 返回 `status=running`、`recovery_blocked=false`，Controller 为 `READY`；已出现新订单和成交。
+- 2026-11-28 19:05 UTC 最新策略版本 `784ef79` 已保留订单重启；容器 running、健康检查 healthy，Condor API 返回 `status=running`、`recovery_blocked=false`，Controller 为 `READY`，并已出现新挂单。
+- 本次重启前 158 笔开放订单全部保留，重启后新增 2 笔；176 条接管记录在停止前全部有保护标记，无退出锁。旧 JSON 文件数为 0，无恢复阻断或旧退出记录警告。
+- 重启前遇到两次 SSH 握手重置，未执行远端命令；等待 60 秒后探测恢复，再完成备份、接管和重启。
 - `scripts/condor_recreate.py` 的健康检查会识别当前启动周期内的 Order/Executor recovery blocked，并忽略旧启动周期的历史错误。
 
 ## 2026-11-28 恢复与 Condor 状态修复

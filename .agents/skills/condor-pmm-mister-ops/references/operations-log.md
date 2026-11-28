@@ -127,3 +127,12 @@
 - 验证：已完成清理测试在旧代码失败，修复后通过；活跃记录和缺失 Executor 保留测试通过；完整策略 pytest 45 项通过。部署后旧 JSON 文件数从 1 降为 0，最新启动日志无 Unfinished loss exit record，健康检查 healthy，Condor 为 running / READY / false，并出现新订单和成交。153 笔部署前订单全部保留，新增 5 笔。
 - 提交与部署：`784ef79 fix: clear resolved loss exit recovery records`；实盘镜像 `v2.17.0-recovery-legacy-cleanup`。
 - 遗留问题：无；后续仍需保留主恢复记录作为清理旧退出文件的安全依据。
+
+## 2026-11-28：确认最新版本并保留订单重启
+
+- 用户目标：将服务器部署切换到最新版本并重启生效。
+- 实际改动：核对镜像标签和关键文件校验值，确认当前镜像已对应最新策略提交 784ef79；未重新构建。备份配置和 docker inspect，接管当前开放订单后以 SIGKILL + docker start 重启原容器。
+- 新发现：远程分支之后的提交仅为文档记忆，不需要新的策略镜像。重启前出现两次 SSH 握手重置，均未执行远端操作；60 秒退避后连接恢复。
+- 验证：176 条接管记录全部有标记，无退出锁；重启后 healthy、running、READY、recovery_blocked=false，出现新挂单；旧 JSON 文件数为 0，无恢复阻断或 Unfinished loss exit record。158 笔重启前订单全部保留，新增 2 笔。
+- 提交与部署：运行镜像 `v2.17.0-recovery-legacy-cleanup`；本次仅更新项目记忆。
+- 遗留问题：无。
