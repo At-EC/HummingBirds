@@ -6,7 +6,8 @@
 
 - 远程仓库：`https://github.com/At-EC/HummingBirds.git`
 - 当前功能分支：`feat/keep-open-orders-recovery`
-- 最近验证的策略修复提交：`26d24da fix: release completed loss exit locks`
+- 最近验证的策略修复提交：`784ef79 fix: clear resolved loss exit recovery records`
+- 近期恢复提交：`8d73efb`（TP 快照去重）、`26d24da`（完成退出释放锁）
 - Condor 状态发布提交：`12d05cd feat: publish recovery state to Condor`
 - Condor API 服务器本地提交：`2ee1a45 fix: surface blocked order recovery in bot status`（未宣称已推送其上游仓库）
 - Draft PR：`https://github.com/At-EC/HummingBirds/pull/1`
@@ -17,26 +18,27 @@
 
 - SSH 主机：`root@103.193.150.25`；使用本地既有密钥和 `known_hosts`，秘密不进入仓库。
 - Bot 容器：`bot_20261126161333-20261126-161343`
-- 运行镜像：`hummingbot/pmm-mister-loss-exit:v2.17.0-recovery-telemetry-lock-fix`
+- 运行镜像：`hummingbot/pmm-mister-loss-exit:v2.17.0-recovery-legacy-cleanup`
 - Controller：`pmm_mister_loss_exit`
 - Controller 配置 ID：`pmm_mister_loss_exit_sample`
 - Connector / 交易对：Binance 现货，`ZEC-USDT`
 - 恢复记录：容器内 `data/pmm_mister_loss_exit/runtime/pmm_mister_loss_exit_sample.json`
 - 实例数据宿主机目录：`/root/hummingbot-api/bots/instances/bot_20261126161333-20261126-161343/data`
-- 2026-11-28 18:28 UTC 容器 running、健康检查 healthy，Condor API 返回 `status=running`、`recovery_blocked=false`，Controller 为 `READY`；新订单已恢复。
+- 2026-11-28 18:51 UTC 容器 running、健康检查 healthy，Condor API 返回 `status=running`、`recovery_blocked=false`，Controller 为 `READY`；已出现新订单和成交。
 - `scripts/condor_recreate.py` 的健康检查会识别当前启动周期内的 Order/Executor recovery blocked，并忽略旧启动周期的历史错误。
 
 ## 2026-11-28 恢复与 Condor 状态修复
 
 - TP 完成时的重复快照已通过 `8d73efb` 修复：TP 与 close 为同一订单时只序列化一次。
 - 遥测部署后稳定复现 `multiple loss exit locks found`。实测磁盘有 5 条 COMPLETED、0 条锁；恢复过程把这些历史已完成记录重新变成锁。
-- `26d24da` 将调度锁限制为 ACTIVATING / ACTIVE；COMPLETED 不再重新持锁。新增恢复回归先失败后通过，完整 pytest 回归 45 项通过。
+- `26d24da` 将调度锁限制为 ACTIVATING / ACTIVE；COMPLETED 不再重新持锁。新增恢复回归先失败后通过。
 - `pmm_mister_loss_exit.get_custom_info()` 发布 `recovery_state` 和 `recovery_blocked`；Condor API 在任一 Controller 阻断时返回 `status=error`，正常 READY 时保持 running。现有前端对 error 显示红色，无需修改前端。
 - 已在实际 Condor API 验证阻断时返回 error / true，修复后返回 running / false。没有可控制的已打开浏览器标签，因此未声称做过视觉截图验证。
-- 最终部署前 152 笔订单中 150 笔保留，2 笔普通订单由策略刷新撤销，部署后快照新增 4 笔。175 条接管记录在最终重建前全部有保护标记。
+- 多锁修复前 152 笔订单中 150 笔保留，2 笔普通订单由策略刷新撤销，部署后快照新增 4 笔。175 条接管记录在最终重建前全部有保护标记。
 - Condor API 相关测试（含状态推送、停止与归档）在 asyncio auto 模式下 76 项通过。
-- 配置和容器备份位于 `/root/condor-backups/recreated-bots/`，最终文件名带 `before-lock-fix`。
-- 仍会出现旧亏损退出文件的 `Unfinished loss exit record found after restart` 警告；当前未因此 BLOCKED，但该历史文件清理逻辑需要另行审查。
+- 配置和容器备份位于 `/root/condor-backups/recreated-bots/`，旧记录清理部署使用 `before-legacy-cleanup` 文件，旧 JSON 另有 `loss-exit-legacy.before-cleanup.json` 备份。
+- `784ef79` 只清理被主恢复记录证明为 COMPLETED / TERMINATED、无锁、无活动退出单且无需对账的旧文件；其他记录继续保留并告警。最新启动后旧 JSON 文件数为 0，不再出现 Unfinished loss exit record 警告。
+- 旧记录清理部署的 153 笔订单全部保留，新增 5 笔；完整策略 pytest 回归 45 项通过。
 
 ## 最近确认的实盘配置
 

@@ -118,3 +118,12 @@
 - 验证：Bot 状态发布和 API 映射测试均先失败后通过；Condor 相关回归在 asyncio auto 模式下 76 项通过。多锁修复回归先失败后通过，完整策略 pytest 45 项通过。实际 API 在阻断时显示 error / true，最终显示 running / false / READY；健康检查 healthy，新订单恢复。最终订单基线 152 笔，150 笔保留、2 笔普通订单刷新撤销、4 笔新增。
 - 提交与部署：HummingBirds `12d05cd`（状态发布）和 `26d24da`（多锁修复）；Condor API 本地提交 `2ee1a45`。实盘镜像 `v2.17.0-recovery-telemetry-lock-fix`，API 已重启。
 - 遗留问题：没有可控制的已打开浏览器标签，未做视觉截图验证；旧亏损退出文件仍会触发 Unfinished loss exit record 警告，需另行审查清理逻辑。Condor API 提交未宣称推送到其上游仓库。
+
+## 2026-11-28：清理已完成的旧亏损退出记录
+
+- 用户目标：修复旧亏损退出文件在每次重启后反复触发 Unfinished loss exit record 警告的问题。
+- 实际改动：LossExitRecoveryStore 在主恢复记录加载后逐条核对旧文件；只删除 COMPLETED / TERMINATED、无锁、无活动退出单且无需对账的记录。ACTIVE、Executor 缺失、记录不可读或仍需对账的文件全部保留并继续告警。部署新镜像并保留订单重建。
+- 新发现：旧文件采用随机 run_id，新进程只清理自己的新文件，导致历史文件永久存在。实盘旧记录对应 Executor 实际已 COMPLETED、无锁、active_order_id 为空且 reconciliation_required=false，可安全清理。
+- 验证：已完成清理测试在旧代码失败，修复后通过；活跃记录和缺失 Executor 保留测试通过；完整策略 pytest 45 项通过。部署后旧 JSON 文件数从 1 降为 0，最新启动日志无 Unfinished loss exit record，健康检查 healthy，Condor 为 running / READY / false，并出现新订单和成交。153 笔部署前订单全部保留，新增 5 笔。
+- 提交与部署：`784ef79 fix: clear resolved loss exit recovery records`；实盘镜像 `v2.17.0-recovery-legacy-cleanup`。
+- 遗留问题：无；后续仍需保留主恢复记录作为清理旧退出文件的安全依据。
