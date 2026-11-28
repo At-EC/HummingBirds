@@ -77,3 +77,19 @@ class RecoveryIdentityTests(unittest.TestCase):
             "connector_name": "binance",
             "trading_pair": "ZEC-USDT",
         })
+
+
+class SnapshotFallbackTests(unittest.IsolatedAsyncioTestCase):
+    async def test_older_adapter_falls_back_to_individual_snapshots(self):
+        from scripts.condor_bootstrap_recovery import fetch_open_orders
+
+        class OlderAdapter:
+            async def fetch_open_order_ids(self):
+                return {"existing-1"}
+
+            async def fetch_order_snapshot(self, order_id):
+                return open_order(order_id)
+
+        snapshots = await fetch_open_orders(OlderAdapter())
+        self.assertEqual(len(snapshots), 1)
+        self.assertEqual(snapshots[0].client_order_id, "existing-1")

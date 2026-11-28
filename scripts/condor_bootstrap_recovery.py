@@ -119,6 +119,16 @@ def make_binance_adapter(connector_name: str, trading_pair: str):
     return BinanceOrderRecoveryAdapter(connector, trading_pair)
 
 
+async def fetch_open_orders(adapter) -> list:
+    if hasattr(adapter, "fetch_open_orders"):
+        return await adapter.fetch_open_orders()
+    order_ids = await adapter.fetch_open_order_ids()
+    return [
+        await adapter.fetch_order_snapshot(order_id)
+        for order_id in sorted(order_ids)
+    ]
+
+
 async def main_async(args):
     identity = discover_controller_identity(Path("conf/controllers"))
     controller_id = args.controller_id or identity["id"]
@@ -127,7 +137,7 @@ async def main_async(args):
     if connector_name != "binance":
         raise ValueError(f"Unsupported recovery connector: {connector_name}")
     adapter = make_binance_adapter(connector_name, trading_pair)
-    snapshots = await adapter.fetch_open_orders()
+    snapshots = await fetch_open_orders(adapter)
     store = ExecutorRecoveryStore(controller_id, Path(args.root))
     payload = store.load() or {
         "schema_version": 1,
