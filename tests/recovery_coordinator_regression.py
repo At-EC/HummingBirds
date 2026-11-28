@@ -64,6 +64,7 @@ class RecoveryCoordinatorTests(unittest.IsolatedAsyncioTestCase):
                     order_id, "FILLED" if order_id == "open-1" else "PARTIALLY_FILLED"
                 )
             )
+            adapter.fetch_open_order_ids = AsyncMock(return_value={"open-1", "tp-1"})
             restorer = MagicMock()
             coordinator = RecoveryCoordinator(store, lambda: adapter, restorer)
             executor = SimpleNamespace(config=SimpleNamespace(id="executor-1"))

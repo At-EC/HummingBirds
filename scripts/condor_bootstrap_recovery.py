@@ -80,6 +80,8 @@ def build_adoption_record(snapshot, connector_name: str, trading_pair: str) -> d
 def merge_adoption_records(payload: dict, snapshots: list, controller_id: str, now: float) -> int:
     existing_ids = set()
     for executor in payload["executors"]:
+        if executor["executor_id"].startswith("adopted-"):
+            executor["recovery_adopted"] = True
         for field in ("open_order", "take_profit_order", "close_order"):
             order = executor.get(field)
             if order is not None:

@@ -93,3 +93,18 @@ class SnapshotFallbackTests(unittest.IsolatedAsyncioTestCase):
         snapshots = await fetch_open_orders(OlderAdapter())
         self.assertEqual(len(snapshots), 1)
         self.assertEqual(snapshots[0].client_order_id, "existing-1")
+
+
+class ExistingAdoptionMarkerTests(unittest.TestCase):
+    def test_existing_adopted_records_receive_marker_on_next_bootstrap(self):
+        payload = {
+            "schema_version": 1,
+            "controller_id": "pmm_mister_loss_exit_sample",
+            "connector_name": "binance",
+            "trading_pair": "ZEC-USDT",
+            "updated_at": 90.0,
+            "executors": [build_adoption_record(open_order(), "binance", "ZEC-USDT")],
+        }
+        payload["executors"][0].pop("recovery_adopted", None)
+        merge_adoption_records(payload, [], "pmm_mister_loss_exit_sample", 100.0)
+        self.assertTrue(payload["executors"][0]["recovery_adopted"])
