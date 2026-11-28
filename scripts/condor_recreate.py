@@ -3,6 +3,7 @@ import json
 import os
 import pathlib
 import subprocess
+import tempfile
 import time
 
 DEFAULT_IMAGE = "hummingbot/pmm-mister-loss-exit:v2.17.0"
@@ -37,41 +38,145 @@ def build_run_args(inspect, env_file, image):
 
 def is_live_deployment(inspect):
     for mount in inspect["Mounts"]:
-        if mount["Destination"].rstrip("/").endswith("/conf/controllers"):
-            for path in pathlib.Path(mount["Source"]).glob("*.yml"):
-                if "_paper_trade" in path.read_text(encoding="utf-8"):
-                    return False
+        destination = mount["Destination"].rstrip("/")
+        source = pathlib.Path(mount["Source"])
+        if destination.endswith("/conf/controllers"):
+            config_paths = list(source.glob("*.yml"))
+        elif "/conf/controllers/" in destination and destination.endswith(".yml"):
+            config_paths = [source]
+        else:
+            continue
+        for path in config_paths:
+            if "_paper_trade" in path.read_text(encoding="utf-8"):
+                return False
     return True
 
 
-def write_environment(inspect, env_file):
-    lines = list(inspect["Config"].get("Env") or [])
+def write_environment(inspect, env_file, keep_open_orders=False):
+    lines = [
+        line for line in (inspect["Config"].get("Env") or [])
+        if not line.startswith("HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN=")
+    ]
     if not any(line.startswith("HEADLESS_MODE=") for line in lines):
         lines.append("HEADLESS_MODE=true")
+    if keep_open_orders:
+        lines.append("HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN=true")
     env_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     os.chmod(env_file, 0o600)
+
+
+def stop_keep_open_orders(container_name):
+    state = json.loads(docker("inspect", container_name))[0]["State"]
+    if not state.get("Running"):
+        return
+    try:
+        docker(
+            "exec", container_name, "/opt/conda/envs/hummingbot/bin/hbot", "stop",
+            "--keep-open-orders", "--timeout", "60",
+        )
+    except subprocess.CalledProcessError as error:
+        if error.returncode == 2:
+            docker("kill", "--signal=SIGUSR2", container_name)
+            deadline = time.time() + 60
+            while time.time() < deadline:
+                state = json.loads(docker("inspect", container_name))[0]["State"]
+                if not state.get("Running"):
+                    return
+                time.sleep(0.5)
+            raise error
+        if error.returncode != 137:
+            raise
+        state = json.loads(docker("inspect", container_name))[0]["State"]
+        if state.get("Running"):
+            raise
+
+
+def bootstrap_open_orders(container_name, controller_id, trading_pair):
+    source = pathlib.Path(__file__).with_name("condor_bootstrap_recovery.py").read_text(
+        encoding="utf-8"
+    )
+    command = [
+        "docker", "exec", "-i", container_name,
+        "/opt/conda/envs/hummingbot/bin/python", "-",
+    ]
+    if controller_id:
+        command += ["--controller-id", controller_id]
+    if trading_pair:
+        command += ["--trading-pair", trading_pair]
+    result = subprocess.run(
+        command, input=source, capture_output=True, text=True, check=False
+    )
+    if result.returncode != 0:
+        raise RuntimeError("Order recovery bootstrap failed; refusing to stop the container")
+    print(f"RECOVERY_BOOTSTRAP={result.stdout.strip()}")
+
+
+def recovery_supported(container_name):
+    paths = [
+        "/home/hummingbot/hummingbot/strategy_v2/controllers/executor_recovery.py",
+        "/home/hummingbot/hummingbot/connector/exchange/binance/binance_order_recovery.py",
+    ]
+    try:
+        with tempfile.TemporaryDirectory(prefix="condor-recovery-probe-") as directory:
+            for path in paths:
+                docker("cp", f"{container_name}:{path}", directory)
+                if not (pathlib.Path(directory) / pathlib.Path(path).name).is_file():
+                    return False
+        return True
+    except subprocess.CalledProcessError:
+        return False
+
+
+def image_supports_recovery(image):
+    paths = [
+        "/home/hummingbot/hummingbot/strategy_v2/controllers/executor_recovery.py",
+        "/home/hummingbot/hummingbot/connector/exchange/binance/binance_order_recovery.py",
+    ]
+    try:
+        for path in paths:
+            docker("run", "--rm", image, "test", "-f", path)
+        return True
+    except subprocess.CalledProcessError:
+        return False
 
 
 def health_check(inspect):
     state = json.loads(docker("inspect", inspect["Name"].lstrip("/")))[0]["State"]
     if not state.get("Running"):
         return False, f"container is not running (exit={state.get('ExitCode')})"
+    name = inspect["Name"].lstrip("/")
+    try:
+        stdout = docker("logs", "--since", state["StartedAt"], name)
+        if "Input is not a terminal" in stdout or "Failed to start strategy" in stdout:
+            return False, "strategy startup failed"
+        if "Order recovery blocked" in stdout or "Executor recovery blocked" in stdout:
+            return False, "order recovery blocked"
+        if "strategy execution started" in stdout:
+            return True, "healthy"
+    except (subprocess.CalledProcessError, KeyError):
+        pass
     for mount in inspect["Mounts"]:
         if mount["Destination"].rstrip("/") != "/home/hummingbot/logs":
             continue
         files = sorted(
-            pathlib.Path(mount["Source"]).glob("logs_bot_*.log"),
+            pathlib.Path(mount["Source"]).glob("logs_*.log"),
             key=lambda path: path.stat().st_mtime,
             reverse=True,
         )
         if not files:
             return False, "no strategy log found"
-        lines = files[0].read_text(encoding="utf-8").splitlines()[-100:]
-        text = "\n".join(lines)
+        lines = files[0].read_text(encoding="utf-8").splitlines()
+        startup_lines = [
+            index for index, line in enumerate(lines)
+            if "strategy execution started" in line
+        ]
+        if not startup_lines:
+            return False, "strategy did not start"
+        text = "\n".join(lines[startup_lines[-1]:])
         if "Input is not a terminal" in text or "Failed to start strategy" in text:
             return False, "strategy startup failed"
-        if "strategy execution started" not in text:
-            return False, "strategy did not start"
+        if "Order recovery blocked" in text or "Executor recovery blocked" in text:
+            return False, "order recovery blocked"
         return True, "healthy"
     return False, "log mount not found"
 
@@ -82,6 +187,9 @@ def main(argv=None):
     parser.add_argument("--image", default=DEFAULT_IMAGE)
     parser.add_argument("--yes", action="store_true")
     parser.add_argument("--live", action="store_true")
+    parser.add_argument("--keep-open-orders", action="store_true")
+    parser.add_argument("--recovery-controller-id")
+    parser.add_argument("--recovery-trading-pair")
     args = parser.parse_args(argv)
 
     name = args.container
@@ -101,6 +209,17 @@ def main(argv=None):
     if live and not args.live:
         print("Refusing live deployment without --live")
         return 2
+    if args.keep_open_orders:
+        if not recovery_supported(name):
+            print("Refusing keep-open-orders: current container lacks recovery support")
+            return 2
+        if not image_supports_recovery(args.image):
+            print("Refusing keep-open-orders: target image lacks recovery support")
+            return 2
+        bootstrap_open_orders(
+            name, args.recovery_controller_id, args.recovery_trading_pair
+        )
+        stop_keep_open_orders(name)
 
     BACKUP_ROOT.mkdir(parents=True, exist_ok=True)
     ENV_ROOT.mkdir(parents=True, exist_ok=True)
@@ -108,7 +227,7 @@ def main(argv=None):
     os.chmod(ENV_ROOT, 0o700)
     (BACKUP_ROOT / f"{name}.json").write_text(json.dumps(inspect, indent=2), encoding="utf-8")
     env_file = ENV_ROOT / f"{name}.env"
-    write_environment(inspect, env_file)
+    write_environment(inspect, env_file, keep_open_orders=args.keep_open_orders)
     docker("rm", "-f", name)
     try:
         container_id = docker(*build_run_args(inspect, env_file, args.image))

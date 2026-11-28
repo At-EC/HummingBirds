@@ -106,3 +106,282 @@ def test_health_check_rejects_failed_strategy(monkeypatch, tmp_path):
     monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
     healthy, _ = health_check(inspect)
     assert not healthy
+
+
+
+def test_environment_keep_open_orders_is_opt_in_and_removed_by_default(tmp_path):
+    from scripts.condor_recreate import write_environment
+    env_file = tmp_path / "bot.env"
+    inspect = make_inspect()
+    inspect["Config"]["Env"] = ["HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN=true"]
+    write_environment(inspect, env_file, keep_open_orders=False)
+    assert "HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN" not in env_file.read_text()
+    write_environment(inspect, env_file, keep_open_orders=True)
+    assert "HBOT_SKIP_ORDER_CANCELLATION_ON_SHUTDOWN=true" in env_file.read_text()
+
+
+def test_keep_open_orders_refuses_incompatible_original(monkeypatch):
+    from scripts import condor_recreate
+    calls = []
+
+    class Result:
+        stdout = json.dumps([make_inspect()])
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: calls.append(args) or Result())
+    monkeypatch.setattr(condor_recreate, "recovery_supported", lambda _: False)
+    assert main([
+        "--container", "demo", "--keep-open-orders", "--yes", "--live",
+    ]) == 2
+    assert all(call[0][1] != "rm" for call in calls)
+
+
+
+def test_paper_trade_single_file_mount_is_not_live(tmp_path):
+    config = tmp_path / "sample.yml"
+    config.write_text("connector_name: binance_paper_trade\n")
+    inspect = make_inspect()
+    inspect["Mounts"] = [{
+        "Source": str(config),
+        "Destination": "/home/hummingbot/conf/controllers/sample.yml",
+        "Mode": "rw",
+    }]
+    assert not is_live_deployment(inspect)
+
+
+
+def test_keep_stop_accepts_137_only_when_container_stopped(monkeypatch):
+    from scripts import condor_recreate
+    calls = []
+
+    states = iter([True, False])
+
+    class Result:
+        def __init__(self, running):
+            self.stdout = json.dumps([{"State": {"Running": running}}])
+            self.stderr = ""
+
+    def fake_docker(*args):
+        calls.append(args)
+        if args[0] == "exec":
+            raise subprocess.CalledProcessError(137, args, stderr="container exited")
+        return Result(next(states)).stdout
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    condor_recreate.stop_keep_open_orders("demo")
+    assert calls[-1] == ("inspect", "demo")
+
+
+def test_keep_stop_rejects_137_while_container_is_running(monkeypatch):
+    from scripts import condor_recreate
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": True}}])
+        stderr = ""
+
+    def fake_docker(*args):
+        if args[0] == "exec":
+            raise subprocess.CalledProcessError(137, args, stderr="container exited")
+        return Result().stdout
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    try:
+        condor_recreate.stop_keep_open_orders("demo")
+    except subprocess.CalledProcessError:
+        pass
+    else:
+        raise AssertionError("running container was accepted as stopped")
+
+
+
+def test_recovery_support_check_uses_docker_cp_for_stopped_container(monkeypatch):
+    from scripts import condor_recreate
+    calls = []
+
+    def fake_docker(*args):
+        calls.append(args)
+        source = args[1].split(":", 1)[1]
+        from pathlib import Path
+        target = Path(args[-1])
+        (target / source.rsplit("/", 1)[-1]).touch()
+        return ""
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    assert condor_recreate.recovery_supported("demo")
+    assert all(call[0] == "cp" for call in calls)
+    assert all(call[1].startswith("demo:") for call in calls)
+
+
+
+def test_keep_stop_is_noop_when_container_already_stopped(monkeypatch):
+    from scripts import condor_recreate
+    calls = []
+
+    def fake_docker(*args):
+        calls.append(args)
+        if args[0] == "inspect":
+            return json.dumps([{"State": {"Running": False}}])
+        raise AssertionError("stop must not be executed for a stopped container")
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    condor_recreate.stop_keep_open_orders("demo")
+    assert calls == [("inspect", "demo")]
+
+
+
+def test_health_check_accepts_pmm_strategy_log(monkeypatch, tmp_path):
+    (tmp_path / "logs_pmm_mister_loss_exit_sample.log").write_text(
+        "strategy execution started\n"
+    )
+    inspect = make_inspect()
+    inspect["Mounts"] = [{
+        "Source": str(tmp_path), "Destination": "/home/hummingbot/logs", "Mode": "rw",
+    }]
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": True, "ExitCode": 0}}])
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    healthy, detail = health_check(inspect)
+    assert healthy, detail
+
+
+
+def test_health_check_finds_startup_before_busy_order_logs(monkeypatch, tmp_path):
+    lines = ["strategy execution started\n"]
+    lines.extend(f"order filled {index}\n" for index in range(150))
+    (tmp_path / "logs_bot_demo.log").write_text("".join(lines))
+    inspect = make_inspect()
+    inspect["Mounts"] = [{
+        "Source": str(tmp_path), "Destination": "/home/hummingbot/logs", "Mode": "rw",
+    }]
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": True, "ExitCode": 0}}])
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    healthy, detail = health_check(inspect)
+    assert healthy, detail
+
+
+
+def test_health_check_accepts_current_container_stdout(monkeypatch):
+    from scripts import condor_recreate
+    inspect = make_inspect()
+    calls = []
+
+    def fake_docker(*args):
+        calls.append(args)
+        if args[0] == "inspect":
+            return json.dumps([{
+                "State": {"Running": True, "ExitCode": 0, "StartedAt": "2026-11-27T09:00:00Z"},
+            }])
+        if args[0] == "logs":
+            return "'v2_with_controllers' strategy execution started."
+        raise AssertionError("health check must not require a log mount")
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    healthy, detail = condor_recreate.health_check(inspect)
+    assert healthy, detail
+    assert calls[1][0] == "logs"
+
+
+def test_health_check_rejects_recovery_blocked_in_container_stdout(monkeypatch):
+    from scripts import condor_recreate
+    inspect = make_inspect()
+
+    def fake_docker(*args):
+        if args[0] == "inspect":
+            return json.dumps([{
+                "State": {"Running": True, "ExitCode": 0, "StartedAt": "2026-11-28T09:00:00Z"},
+            }])
+        if args[0] == "logs":
+            return "strategy execution started\nExecutor recovery blocked for executor-1: duplicate order id"
+        raise AssertionError(args)
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    healthy, detail = condor_recreate.health_check(inspect)
+    assert not healthy
+    assert detail == "order recovery blocked"
+
+
+def test_health_check_rejects_recovery_blocked_after_latest_file_startup(monkeypatch, tmp_path):
+    (tmp_path / "logs_bot_demo.log").write_text(
+        "strategy execution started\n"
+        "Order recovery blocked: duplicate order id: tp-1\n"
+    )
+    inspect = make_inspect()
+    inspect["Mounts"] = [{
+        "Source": str(tmp_path), "Destination": "/home/hummingbot/logs", "Mode": "rw",
+    }]
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": True, "ExitCode": 0}}])
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    healthy, detail = health_check(inspect)
+    assert not healthy
+    assert detail == "order recovery blocked"
+
+
+def test_health_check_ignores_recovery_block_before_latest_file_startup(monkeypatch, tmp_path):
+    (tmp_path / "logs_bot_demo.log").write_text(
+        "strategy execution started\n"
+        "Order recovery blocked: old incident\n"
+        "strategy execution started\n"
+        "order filled\n"
+    )
+    inspect = make_inspect()
+    inspect["Mounts"] = [{
+        "Source": str(tmp_path), "Destination": "/home/hummingbot/logs", "Mode": "rw",
+    }]
+
+    class Result:
+        stdout = json.dumps([{"State": {"Running": True, "ExitCode": 0}}])
+        stderr = ""
+
+    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: Result())
+    healthy, detail = health_check(inspect)
+    assert healthy, detail
+
+
+
+def test_bootstrap_streams_worker_before_any_stop(monkeypatch):
+    from unittest.mock import MagicMock
+    from scripts import condor_recreate
+
+    class Result:
+        returncode = 0
+        stdout = '{"adopted": 2, "total_executors": 2}'
+        stderr = ""
+
+    runner = MagicMock(return_value=Result())
+    monkeypatch.setattr(subprocess, "run", runner)
+    condor_recreate.bootstrap_open_orders("demo", "pmm_mister_loss_exit_sample", "ZEC-USDT")
+    command = runner.call_args.args[0]
+    assert command[:4] == ["docker", "exec", "-i", "demo"]
+    assert "stop" not in command
+    assert "rm" not in command
+    assert "def build_adoption_record" in runner.call_args.kwargs["input"]
+
+
+
+def test_keep_stop_falls_back_to_sigusr2_when_cli_is_unavailable(monkeypatch):
+    from scripts import condor_recreate
+    calls = []
+    states = iter([True, True, False])
+
+    def fake_docker(*args):
+        calls.append(args)
+        if args[0] == "inspect":
+            return json.dumps([{"State": {"Running": next(states)}}])
+        if args[0] == "exec":
+            raise subprocess.CalledProcessError(2, args, stderr="no bot has been started")
+        return ""
+
+    monkeypatch.setattr(condor_recreate, "docker", fake_docker)
+    condor_recreate.stop_keep_open_orders("demo")
+    assert ("kill", "--signal=SIGUSR2", "demo") in calls

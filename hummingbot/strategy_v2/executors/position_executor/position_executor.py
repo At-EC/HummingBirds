@@ -89,6 +89,8 @@ class PositionExecutor(ExecutorBase):
         self._loss_exit_activated = False
         self._loss_exit_last_error = None
         self._loss_exit_order_reconciliation_required = False
+        self._no_budget_tp_cancel_requested = False
+        self._recovery_adopted = False
 
     @property
     def is_perpetual(self) -> bool:
@@ -379,7 +381,7 @@ class PositionExecutor(ExecutorBase):
     def loss_exit_lock_held(self) -> bool:
         return (self._loss_exit_activated and not self.is_closed
                 and self._loss_exit.state in (
-                    LossExitState.ACTIVATING, LossExitState.ACTIVE, LossExitState.COMPLETED
+                    LossExitState.ACTIVATING, LossExitState.ACTIVE
                 ))
 
     def _update_loss_exit_state(self):
@@ -871,6 +873,20 @@ class PositionExecutor(ExecutorBase):
         )
         self.logger().debug("Removing take profit")
 
+    def cancel_take_profit_for_no_budget(self) -> bool:
+        if (self.status != RunnableStatus.RUNNING
+                or self._take_profit_limit_order is None
+                or not self._take_profit_limit_order.is_open):
+            return False
+        order_id = self._take_profit_limit_order.order_id
+        self.cancel_take_profit()
+        self._no_budget_tp_cancel_requested = True
+        self.early_stop(keep_position=True)
+        self.logger().info(
+            f"Cancelled distant TP {order_id} to release budget; no replacement order was placed."
+        )
+        return True
+
     def cancel_open_order(self):
         """
         This method is responsible for canceling the open order.
@@ -1145,6 +1161,14 @@ class PositionExecutor(ExecutorBase):
                 self._loss_exit_last_error = "Exit order failed; retry after cooldown"
                 self._loss_exit_cancel_requested = False
 
+    def snapshot_recovery_state(self) -> Dict:
+        from hummingbot.strategy_v2.executors.position_executor.recovery import ExecutorRuntimeRestorer
+        return ExecutorRuntimeRestorer.snapshot(self)
+
+    def restore_recovery_state(self, record: Dict, snapshots: Dict) -> None:
+        from hummingbot.strategy_v2.executors.position_executor.recovery import ExecutorRuntimeRestorer
+        ExecutorRuntimeRestorer.restore(self, record, snapshots)
+
     def get_custom_info(self) -> Dict:
         info = {
             "level_id": self.config.level_id,
@@ -1166,6 +1190,8 @@ class PositionExecutor(ExecutorBase):
                 if self._take_profit_limit_order and self._take_profit_limit_order.is_open else None
             ),
             "held_position_orders": self._held_position_orders,
+            "no_budget_tp_cancel_requested": self._no_budget_tp_cancel_requested,
+            "recovery_adopted": self._recovery_adopted,
         }
         if self._loss_exit is not None:
             info.update({

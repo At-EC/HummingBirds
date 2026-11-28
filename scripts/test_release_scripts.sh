@@ -15,17 +15,29 @@ paths=(
   controllers/generic/pmm_mister_loss_exit.py
   controllers/generic/pmm_mister_loss_exit.example.yml
   hummingbot/data_feed/market_data_provider.py
+  hummingbot/connector/exchange/binance/binance_order_recovery.py
+  hummingbot/cli/engine.py
+  hummingbot/cli/commands/stop.py
+  hummingbot/client/command/stop_command.py
+  hummingbot/core/trading_core.py
+  hummingbot/strategy/strategy_v2_base.py
   hummingbot/strategy_v2/controllers/order_budget.py
   hummingbot/strategy_v2/controllers/loss_exit_recovery.py
+  hummingbot/strategy_v2/controllers/executor_recovery.py
+  hummingbot/strategy_v2/controllers/recovery_coordinator.py
   hummingbot/strategy_v2/executors/executor_orchestrator.py
   hummingbot/strategy_v2/executors/position_executor/data_types.py
   hummingbot/strategy_v2/executors/position_executor/loss_exit.py
   hummingbot/strategy_v2/executors/position_executor/position_executor.py
+  hummingbot/strategy_v2/executors/position_executor/recovery.py
   hummingbot/strategy_v2/models/executor_actions.py
+  scripts/condor_recovery_check.py
+  scripts/condor_bootstrap_recovery.py
 )
 
 for path in "${paths[@]}"; do
   tar -tzf release/pmm-loss-exit-overlay.tar.gz | grep -Fx "home/hummingbot/$path" >/dev/null
+  grep -F "COPY $path $path" Dockerfile >/dev/null
 done
 
 tar -tzf release/pmm-loss-exit-overlay.tar.gz | grep -Fx "install_loss_exit.sh" >/dev/null

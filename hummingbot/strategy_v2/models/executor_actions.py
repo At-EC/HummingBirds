@@ -39,3 +39,8 @@ class StoreExecutorAction(ExecutorAction):
 class ActivateLossExitAction(ExecutorAction):
     """Activate loss exit on one already eligible PositionExecutor."""
     executor_id: str
+
+
+class CancelTakeProfitAction(ExecutorAction):
+    """Cancel a distant TP to release budget without placing an exit order."""
+    executor_id: str

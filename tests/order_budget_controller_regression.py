@@ -28,6 +28,7 @@ def make_controller(config):
     controller.executors_info = []
     controller._global_close_phase = None
     controller._loss_exit_runtime_owns_record = False
+    controller.recovery_state = "DISABLED"
     return controller
 
 
@@ -108,14 +109,14 @@ def test_expected_tp_ignores_opposite_direction_open_tps():
     assert controller.get_executor_config("buy_0", Decimal("100"), Decimal("1")) is not None
 
 
-def test_entry_tp_distance_boundary_and_disable_behavior():
+def test_entry_price_filter_removed_but_boundary_and_disable_still_work():
     OrderBudgetGuard.reset()
     controller = make_controller(make_config(
         tp_order_distance_tolerance_pct="0.001",
         take_profit="0.01",
     ))
     add_open_tp(controller, TradeType.BUY, Decimal("100.05"))
-    assert controller.get_executor_config("buy_0", Decimal("100"), Decimal("1")) is None
+    assert controller.get_executor_config("buy_0", Decimal("100"), Decimal("1")) is not None
 
     controller.executors_info = []
     add_open_tp(controller, TradeType.BUY, Decimal("1000"))

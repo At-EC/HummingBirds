@@ -25,6 +25,7 @@ from hummingbot.strategy_v2.executors.xemm_executor.xemm_executor import XEMMExe
 from hummingbot.strategy_v2.models.base import RunnableStatus
 from hummingbot.strategy_v2.models.executor_actions import (
     ActivateLossExitAction,
+    CancelTakeProfitAction,
     CreateExecutorAction,
     ExecutorAction,
     StopExecutorAction,
@@ -395,7 +396,7 @@ class ExecutorOrchestrator:
                 ))
         return tuple(signature)
 
-    async def stop(self, max_executors_close_attempts: int = 3):
+    async def stop(self, max_executors_close_attempts: int = 3, skip_order_cancellation: bool = False):
         """
         Stop the orchestrator task and all active executors.
 
@@ -405,6 +406,16 @@ class ExecutorOrchestrator:
         is force-stopped synchronously, converting whatever it executed into a
         position hold so no exposure goes untracked.
         """
+        if skip_order_cancellation:
+            self._persist_recovery_snapshots()
+            for executors_list in self.active_executors.values():
+                for executor in executors_list:
+                    executor.stop()
+            self.store_all_positions()
+            self.store_all_executors()
+            self.active_executors.clear()
+            return
+
         for controller_id, executors_list in self.active_executors.items():
             for executor in executors_list:
                 if executor.is_closed or executor.status == RunnableStatus.SHUTTING_DOWN:
@@ -521,6 +532,7 @@ class ExecutorOrchestrator:
         """
         Execute the action and handle executors based on action type.
         """
+        self._persist_recovery_snapshots()
         controller_id = action.controller_id
         if controller_id is None:
             self.logger().error(f"Received action with controller_id=None: {action}. "
@@ -531,7 +543,9 @@ class ExecutorOrchestrator:
             self.positions_held[controller_id] = []
             self.cached_performance[controller_id] = PerformanceReport()
 
-        if isinstance(action, ActivateLossExitAction):
+        if isinstance(action, CancelTakeProfitAction):
+            self.cancel_take_profit_for_no_budget(action)
+        elif isinstance(action, ActivateLossExitAction):
             self.activate_loss_exit(action)
         elif isinstance(action, CreateExecutorAction):
             self.create_executor(action)
@@ -539,6 +553,24 @@ class ExecutorOrchestrator:
             self.stop_executor(action)
         elif isinstance(action, StoreExecutorAction):
             self.store_executor(action)
+
+    def cancel_take_profit_for_no_budget(self, action: CancelTakeProfitAction):
+        executor = next(
+            (item for item in self.active_executors.get(action.controller_id, [])
+             if item.config.id == action.executor_id),
+            None,
+        )
+        if executor is None:
+            self.logger().error(
+                f"Cannot cancel TP for no budget: executor {action.executor_id} not found."
+            )
+            return
+        if not isinstance(executor, PositionExecutor):
+            self.logger().error(
+                f"Cannot cancel TP for no budget on {type(executor).__name__}."
+            )
+            return
+        executor.cancel_take_profit_for_no_budget()
 
     def activate_loss_exit(self, action: ActivateLossExitAction):
         controller_id = action.controller_id
@@ -569,8 +601,22 @@ class ExecutorOrchestrator:
         """
         Execute a list of actions.
         """
+        self._persist_recovery_snapshots()
         for action in actions:
             self.execute_action(action)
+
+    def _persist_recovery_snapshots(self):
+        for controller_id, executors in self.active_executors.items():
+            controller = self.strategy.controllers.get(controller_id)
+            persist = getattr(controller, "persist_recovery_snapshots", None)
+            if persist is None:
+                continue
+            snapshots = [
+                executor.snapshot_recovery_state()
+                for executor in executors
+                if hasattr(executor, "snapshot_recovery_state")
+            ]
+            persist(snapshots)
 
     def create_executor(self, action: CreateExecutorAction):
         """
@@ -594,8 +640,22 @@ class ExecutorOrchestrator:
         else:
             raise ValueError("Unsupported executor config type")
 
+        controller = self.strategy.controllers.get(controller_id)
+        recovery_getter = getattr(controller, "get_recovery_restore_data", None)
+        recovery_data = recovery_getter(executor_config.id) if recovery_getter else None
+        if recovery_data is not None:
+            try:
+                executor.restore_recovery_state(
+                    recovery_data["record"], recovery_data["snapshots"]
+                )
+            except Exception as error:
+                controller.mark_recovery_blocked(str(error))
+                self.logger().error(f"Executor recovery blocked for {executor_config.id}: {error}")
+                return
         executor.start()
         self.active_executors[controller_id].append(executor)
+        if recovery_data is not None:
+            controller.complete_recovery_executor(executor_config.id)
         # MarketsRecorder.get_instance().store_or_update_executor(executor)
         self.logger().debug(f"Created {type(executor).__name__} for controller {controller_id}")
 
